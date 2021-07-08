@@ -7,4 +7,5 @@ Further details about the stack and integration guidelines can be found in "AN13
 
 Release version
 ---------------
+ * R1.1: Update according internal tag PN7160_AR_11.02.00 (branch aosp-vendor-nxp-Android-11), including NFC Forum DTA application and T4T NDEF emulation support
  * R1.0: Initial release based on internal tag PN7160_AR_11.01.00 (branch aosp-vendor-nxp-Android-11)

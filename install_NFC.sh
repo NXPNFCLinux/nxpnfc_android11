@@ -12,6 +12,10 @@ cd $ANDROID_BUILD_TOP/packages/apps/Nfc
 patch -p1 <$ANDROID_BUILD_TOP/vendor/nxp/nfc/patches/AROOT_packages_apps_Nfc.patch
 cd $ANDROID_BUILD_TOP/frameworks/native
 patch -p1 <$ANDROID_BUILD_TOP/vendor/nxp/nfc/patches/AROOT_frameworks_native.patch
+cd $ANDROID_BUILD_TOP/frameworks/base
+patch -p1 <$ANDROID_BUILD_TOP/vendor/nxp/nfc/patches/AROOT_frameworks_base.patch
+cd $ANDROID_BUILD_TOP/vendor/nxp
+patch -p1 <$ANDROID_BUILD_TOP/vendor/nxp/nfc/patches/AROOT_vendor_nxp_frameworks.patch
 cd $ANDROID_BUILD_TOP
 
 echo

@@ -1,7 +1,7 @@
 From 42319f45a51805861526cca2dbe00a42949f930a Mon Sep 17 00:00:00 2001
 From: nxf31698 <suryaprakash.konduru@nxp.com>
 Date: Wed, 18 Nov 2020 11:23:04 +0530
-Subject: [PATCH] [artf798870] Applied original patch which we used for
+Subject: [PATCH 1/9] [artf798870] Applied original patch which we used for
  Android10 7150
 
 patch taken from nfcandroid_platform repo
@@ -700,5 +700,3186 @@ index 11953d6b5..753dc7313 100644
        GKI_freebuf(p_resp);
        break;
 -- 
-2.30.0
+2.32.0
+
+
+From 426a0f8bcca9998d212e348363167641d9ac4106 Mon Sep 17 00:00:00 2001
+From: nxf31698 <suryaprakash.konduru@nxp.com>
+Date: Tue, 2 Mar 2021 13:02:59 +0530
+Subject: [PATCH 2/9] [artf824041] Enabled DTA Support with CR11 and
+ "NFCDTA_11.19" Tag
+
+---
+ src/adaptation/NfcAdaptation.cc | 16 ++++++++++++++++
+ src/include/buildcfg.h          |  4 +++-
+ src/include/nci_defs.h          |  2 +-
+ src/nfa/include/nfa_api.h       |  6 ++++++
+ 4 files changed, 26 insertions(+), 2 deletions(-)
+
+diff --git a/src/adaptation/NfcAdaptation.cc b/src/adaptation/NfcAdaptation.cc
+index c34713955..32dbab87f 100644
+--- a/src/adaptation/NfcAdaptation.cc
++++ b/src/adaptation/NfcAdaptation.cc
+@@ -1073,3 +1073,19 @@ AutoThreadMutex::AutoThreadMutex(ThreadMutex& m) : mm(m) { mm.lock(); }
+ **
+ *******************************************************************************/
+ AutoThreadMutex::~AutoThreadMutex() { mm.unlock(); }
++
++#if (NXP_EXTNS == TRUE)
++/***************************************************************************
++**
++** Function         initializeGlobalAppDtaMode.
++**
++** Description      initialize Dta App Mode flag.
++**
++** Returns          None.
++**
++***************************************************************************/
++void initializeGlobalAppDtaMode() {
++  appl_dta_mode_flag = 0x01;
++  ALOGD("%s: DTA Enabled", __func__);
++}
++#endif
+diff --git a/src/include/buildcfg.h b/src/include/buildcfg.h
+index b66695bb9..58965bdda 100644
+--- a/src/include/buildcfg.h
++++ b/src/include/buildcfg.h
+@@ -44,5 +44,7 @@
+ #define GKI_BUF0_MAX 40
+ 
+ #define GKI_NUM_FIXED_BUF_POOLS 4
+-
++#if (NXP_EXTNS == TRUE)
++void initializeGlobalAppDtaMode();
++#endif
+ #endif
+diff --git a/src/include/nci_defs.h b/src/include/nci_defs.h
+index b43cb1cb1..e85360cef 100644
+--- a/src/include/nci_defs.h
++++ b/src/include/nci_defs.h
+@@ -34,7 +34,7 @@
+ #define NCI_MAX_PAYLOAD_SIZE 0xFE
+ #define NCI_CTRL_INIT_SIZE 32  /* initial NFCC control payload size */
+ #define NCI_MAX_VSC_SIZE 0xFF
+-#define APPL_DTA_MODE FALSE
++#define APPL_DTA_MODE TRUE
+ /* NCI header (3) + callback function pointer(8; use 8 to be safe) + HCIT (1
+  * byte) */
+ #define NCI_VSC_MSG_HDR_SIZE 12
+diff --git a/src/nfa/include/nfa_api.h b/src/nfa/include/nfa_api.h
+index d13996623..0bce8b1eb 100755
+--- a/src/nfa/include/nfa_api.h
++++ b/src/nfa/include/nfa_api.h
+@@ -259,6 +259,12 @@ typedef enum {
+   NFA_DTA_LLCP_MODE = 0x00000002,
+   NFA_DTA_HCEF_MODE = 0x00000004,
+   NFA_DTA_CR8 = 0x00000080,
++  #if (NXP_EXTNS == TRUE)
++    NFA_DTA_CR9 = 0x00000090,
++    NFA_DTA_CR10 = 0x000000A0,
++    NFA_DTA_CR11 = 0x000000B0,
++    NFA_DTA_CR12 = 0x00000040,
++  #endif
+ } tNFA_eDtaModes;
+ 
+ /* NFA Connection Callback Events */
+-- 
+2.32.0
+
+
+From 3075363f22f72e11f9835a794520cb1fa0703be1 Mon Sep 17 00:00:00 2001
+From: nxf31698 <suryaprakash.konduru@nxp.com>
+Date: Mon, 26 Apr 2021 17:42:14 +0530
+Subject: [PATCH 3/9] [artf845428] LLCP CTO_TAR_BI_02 x=5 sub test case IUT
+ sending DM PDU instead SYMM PDU (FN MW)
+
+Ref code taken from artifact: artf576956
+applied patch from attachments FN_LLCP_SYMM_PDU_Fix.patch
+---
+ src/nfc/llcp/llcp_dlc.cc | 12 +++++++++---
+ 1 file changed, 9 insertions(+), 3 deletions(-)
+
+diff --git a/src/nfc/llcp/llcp_dlc.cc b/src/nfc/llcp/llcp_dlc.cc
+index 5882b9a38..dcdad228c 100644
+--- a/src/nfc/llcp/llcp_dlc.cc
++++ b/src/nfc/llcp/llcp_dlc.cc
+@@ -647,12 +647,18 @@ static void llcp_dlc_proc_connect_pdu(uint8_t dsap, uint8_t ssap,
+      * As per the LLCP test specification v1.2.00 by receiving erroneous SNL PDU
+      * i'e with improper length and service name "urn:nfc:sn:dta-co-echo-in",
+      * the IUT should not send any PDU except SYMM PDU */
+-
++#if (NXP_EXTNS != TRUE)
+     if (appl_dta_mode_flag == 1 &&
+         p_data[1] == strlen((const char*)&p_data[2])) {
+-      DLOG_IF(INFO, nfc_debug_enabled)
+-          << StringPrintf("%s: Strings are not equal", __func__);
++      DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: Strings are not equal", __func__);
+       llcp_util_send_dm(ssap, dsap, LLCP_SAP_DM_REASON_NO_SERVICE);
++#else
++    if (appl_dta_mode_flag == 1) {
++      if(p_data[1] == strlen((const char*)&p_data[2])) {
++        DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: Strings are not equal", __func__);
++        llcp_util_send_dm(ssap, dsap, LLCP_SAP_DM_REASON_NO_SERVICE);
++      }
++#endif
+     } else {
+       llcp_util_send_dm(ssap, dsap, LLCP_SAP_DM_REASON_NO_SERVICE);
+     }
+-- 
+2.32.0
+
+
+From 8d2d6de23db11a00e93998e39e9f008d2e8df522 Mon Sep 17 00:00:00 2001
+From: nxf31698 <suryaprakash.konduru@nxp.com>
+Date: Thu, 29 Apr 2021 18:50:33 +0530
+Subject: [PATCH 4/9] [artf845428] TC_CTO_TAR_BI_09 Test case failed in MP
+ tool. Updated LLCP layer to send FRMR instead of DM PDU in case we receive
+ Connect PDU during Information exchange phase.
+
+Ref artifact: artf692736
+---
+ src/nfc/llcp/llcp_dlc.cc | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/src/nfc/llcp/llcp_dlc.cc b/src/nfc/llcp/llcp_dlc.cc
+index 5882b9a38..ec463957e 100644
+--- a/src/nfc/llcp/llcp_dlc.cc
++++ b/src/nfc/llcp/llcp_dlc.cc
+@@ -706,8 +706,9 @@ static void llcp_dlc_proc_connect_pdu(uint8_t dsap, uint8_t ssap,
+   /* check if any data link */
+   p_dlcb = llcp_dlc_find_dlcb_by_sap(dsap, ssap);
+   if (p_dlcb) {
+-    LOG(ERROR) << StringPrintf("Data link is aleady established");
+-    llcp_util_send_dm(ssap, dsap, LLCP_SAP_DM_REASON_TEMP_REJECT_THIS);
++     LOG(ERROR) << StringPrintf("Data link is aleady established; Sending FRMR");
++     llcp_util_send_frmr(p_dlcb, LLCP_FRMR_W_ERROR_FLAG, LLCP_PDU_CONNECT_TYPE, 0);
++     llcp_dlsm_execute(p_dlcb, LLCP_DLC_EVENT_FRAME_ERROR, nullptr);
+   } else {
+     /* allocate data link connection control block and notify upper layer
+      * through state machine */
+-- 
+2.32.0
+
+
+From d949bd882d6555663084321f6b1843a344cb1e80 Mon Sep 17 00:00:00 2001
+From: nxf31698 <suryaprakash.konduru@nxp.com>
+Date: Fri, 11 Jun 2021 08:31:04 +0530
+Subject: [PATCH 5/9] [artf870316] T4T Ndef emulation changes
+
+Branch:br_ar_12_comm_base_dev
+
+Commit ID's
+0672f6ca33ae7442c19c05016ae6892be99ab4fc
+a7cca47162f39294320fcdfce30356a90b211efb
+36bc4af57c917e9bc656a35c6449c84629c24045
+496ca56a8e5abecd2e402eb4f624746d01a3999e
+b77c0daa8aa45f80b88506e6e2a697c67cf917d8
+e049cf86923d7dcc9d2faac7c6a22174162549eb
+190f3276a43ca5c74f9215da204cdff8e4303865
+0fc320f9463f871f28e1ab8435382b02da422b8b
+9c4594d2e198ad17f3398bace759c05d36e416c3
+eb65f32bf8d77a4fd677886775f084b87fe109a2
+---
+ src/Android.bp                     |   1 +
+ src/include/Nxp_Features.h         | 121 +++++
+ src/include/nci_defs.h             |   1 +
+ src/include/nci_defs_extns.h       |  61 +++
+ src/include/nfc_config.h           |   2 +
+ src/include/nfc_target.h           |   4 +-
+ src/nfa/dm/nfa_dm_act.cc           |   7 +
+ src/nfa/dm/nfa_dm_api.cc           |  46 +-
+ src/nfa/dm/nfa_dm_discover.cc      |   7 +-
+ src/nfa/ee/nfa_ee_act.cc           |  72 +++
+ src/nfa/hci/nfa_hci_main.cc        |  11 +-
+ src/nfa/include/nfa_nfcee_api.h    |  91 ++++
+ src/nfa/include/nfa_nfcee_int.h    | 155 +++++++
+ src/nfa/include/nfa_sys.h          |   3 +
+ src/nfa/t4tnfcee/nfa_nfcee_act.cc  | 680 +++++++++++++++++++++++++++++
+ src/nfa/t4tnfcee/nfa_nfcee_api.cc  | 177 ++++++++
+ src/nfa/t4tnfcee/nfa_nfcee_main.cc | 347 +++++++++++++++
+ src/nfc/include/nfc_api.h          |  20 +
+ src/nfc/include/rw_api.h           | 138 ++++++
+ src/nfc/include/rw_int.h           |   3 +
+ src/nfc/include/tags_defs.h        |   7 +-
+ src/nfc/nfc/nfc_main.cc            |  33 +-
+ src/nfc/nfc/nfc_utils.cc           |   7 +
+ src/nfc/tags/rw_main.cc            |  30 ++
+ src/nfc/tags/rw_t4t.cc             | 257 ++++++++++-
+ 25 files changed, 2265 insertions(+), 16 deletions(-)
+ create mode 100644 src/include/Nxp_Features.h
+ create mode 100755 src/include/nci_defs_extns.h
+ create mode 100644 src/nfa/include/nfa_nfcee_api.h
+ create mode 100644 src/nfa/include/nfa_nfcee_int.h
+ create mode 100644 src/nfa/t4tnfcee/nfa_nfcee_act.cc
+ create mode 100644 src/nfa/t4tnfcee/nfa_nfcee_api.cc
+ create mode 100644 src/nfa/t4tnfcee/nfa_nfcee_main.cc
+
+diff --git a/src/Android.bp b/src/Android.bp
+index 2e98bb4f3..b9765707c 100644
+--- a/src/Android.bp
++++ b/src/Android.bp
+@@ -48,6 +48,7 @@ cc_library_shared {
+         "nfa/p2p/*.cc",
+         "nfa/rw/*.cc",
+         "nfa/sys/*.cc",
++        "nfa/t4tnfcee/*.cc",
+         "nfc/llcp/*.cc",
+         "nfc/nci/*.cc",
+         "nfc/ndef/*.cc",
+diff --git a/src/include/Nxp_Features.h b/src/include/Nxp_Features.h
+new file mode 100644
+index 000000000..b6741adfe
+--- /dev/null
++++ b/src/include/Nxp_Features.h
+@@ -0,0 +1,121 @@
++/******************************************************************************
++ *
++ *  Copyright 2018,2020 NXP
++ *
++ *  Licensed under the Apache License, Version 2.0 (the "License");
++ *  you may not use this file except in compliance with the License.
++ *  You may obtain a copy of the License at
++ *
++ *  http://www.apache.org/licenses/LICENSE-2.0
++ *
++ *  Unless required by applicable law or agreed to in writing, software
++ *  distributed under the License is distributed on an "AS IS" BASIS,
++ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ *  See the License for the specific language governing permissions and
++ *  limitations under the License.
++ *
++ ******************************************************************************/
++
++#ifndef NXP_FEATURES_H
++#define NXP_FEATURES_H
++#include <unistd.h>
++#include <string>
++
++#define FW_MOBILE_MAJOR_NUMBER_PN553 0x01
++#define FW_MOBILE_MAJOR_NUMBER_PN81A 0x02
++#define FW_MOBILE_MAJOR_NUMBER_PN551 0x05
++#define FW_MOBILE_MAJOR_NUMBER_PN557 0x01
++#define FW_MOBILE_MAJOR_NUMBER_PN548AD 0x01
++/*Including T4T NFCEE by incrementing 1*/
++#define NFA_EE_MAX_EE_SUPPORTED 5
++ using namespace std;
++typedef enum {
++  unknown,
++  pn547C2,
++  pn65T,
++  pn548C2,
++  pn66T,
++  pn551,
++  pn67T,
++  pn553,
++  pn80T,
++  pn557,
++  pn81T
++} tNFC_chipType;
++
++typedef struct {
++  tNFC_chipType chipType;
++  std::string _FW_LIB_PATH;
++  std::string _FW_BIN_PATH;
++  uint16_t _PHDNLDNFC_USERDATA_EEPROM_OFFSET;
++  uint16_t _PHDNLDNFC_USERDATA_EEPROM_LEN;
++  uint8_t _FW_MOBILE_MAJOR_NUMBER;
++} tNfc_featureList;
++
++extern tNfc_featureList nfcFL;
++
++#define CONFIGURE_FEATURELIST(chipType)                                      \
++  {                                                                          \
++    nfcFL.chipType = chipType;                                               \
++    if (chipType == pn81T) {                                                 \
++      nfcFL.chipType = pn557;                                                \
++    } else if (chipType == pn80T) {                                          \
++      nfcFL.chipType = pn553;                                                \
++    } else if (chipType == pn67T) {                                          \
++      nfcFL.chipType = pn551;                                                \
++    } else if (chipType == pn66T) {                                          \
++      nfcFL.chipType = pn548C2;                                              \
++     }                                                                       \
++      CONFIGURE_FEATURELIST_NFCC(chipType)                                   \
++  }
++
++#define CONFIGURE_FEATURELIST_NFCC(chipType)                                \
++  {                                                                         \
++    nfcFL._PHDNLDNFC_USERDATA_EEPROM_OFFSET = 0x023CU;                      \
++    nfcFL._PHDNLDNFC_USERDATA_EEPROM_LEN = 0x0C80U;                         \
++                                                                            \
++    if (chipType == pn557 || chipType == pn81T) {                           \
++                                                                            \
++      STRCPY_FW_LIB("libpn7160_fw")                                          \
++      STRCPY_FW_BIN("pn7160")                                                \
++                                                                            \
++      nfcFL._FW_MOBILE_MAJOR_NUMBER = FW_MOBILE_MAJOR_NUMBER_PN557;         \
++    } else if (chipType == pn553 || chipType == pn80T) {                    \
++                                                                            \
++      STRCPY_FW_LIB("libpn553_fw")                                          \
++      STRCPY_FW_BIN("pn553")                                                \
++                                                                            \
++      nfcFL._FW_MOBILE_MAJOR_NUMBER = FW_MOBILE_MAJOR_NUMBER_PN553;         \
++                                                                            \
++    } else if (chipType == pn551 || chipType == pn67T) {                    \
++                                                                            \
++      STRCPY_FW_LIB("libpn551_fw")                                          \
++      STRCPY_FW_BIN("pn551")                                                \
++                                                                            \
++      nfcFL._PHDNLDNFC_USERDATA_EEPROM_OFFSET = 0x02BCU;                    \
++      nfcFL._PHDNLDNFC_USERDATA_EEPROM_LEN = 0x0C00U;                       \
++      nfcFL._FW_MOBILE_MAJOR_NUMBER = FW_MOBILE_MAJOR_NUMBER_PN551;         \
++                                                                            \
++    } else if (chipType == pn548C2 || chipType == pn66T) {                  \
++                                                                            \
++      STRCPY_FW_LIB("libpn548ad_fw")                                        \
++      STRCPY_FW_BIN("pn548")                                                \
++                                                                            \
++      nfcFL._PHDNLDNFC_USERDATA_EEPROM_OFFSET = 0x02BCU;                    \
++      nfcFL._PHDNLDNFC_USERDATA_EEPROM_LEN = 0x0C00U;                       \
++      nfcFL._FW_MOBILE_MAJOR_NUMBER = FW_MOBILE_MAJOR_NUMBER_PN548AD;       \
++     }                                                                      \
++  }
++#define STRCPY_FW_LIB(str) {                                                \
++  nfcFL._FW_LIB_PATH.clear();                                               \
++  nfcFL._FW_LIB_PATH.append(FW_LIB_ROOT_DIR);                               \
++  nfcFL._FW_LIB_PATH.append(str);                                           \
++  nfcFL._FW_LIB_PATH.append(FW_LIB_EXTENSION);                              \
++}
++#define STRCPY_FW_BIN(str) {                                                \
++  nfcFL._FW_BIN_PATH.clear();                                               \
++  nfcFL._FW_BIN_PATH.append(FW_BIN_ROOT_DIR);                               \
++  nfcFL._FW_BIN_PATH.append(str);                                           \
++  nfcFL._FW_BIN_PATH.append(FW_BIN_EXTENSION);                              \
++}
++#endif
+diff --git a/src/include/nci_defs.h b/src/include/nci_defs.h
+index e85360cef..cd2c9d9a4 100644
+--- a/src/include/nci_defs.h
++++ b/src/include/nci_defs.h
+@@ -91,6 +91,7 @@
+ #define NCI_DEST_TYPE_NFCC 1   /* NFCC - loopback */
+ #define NCI_DEST_TYPE_REMOTE 2 /* Remote NFC Endpoint */
+ #define NCI_DEST_TYPE_NFCEE 3  /* NFCEE */
++#define NCI_DEST_TYPE_T4T_NFCEE 5 /* T4T NFCEE */
+ 
+ /* builds byte0 of NCI Command and Notification packet */
+ #define NCI_MSG_BLD_HDR0(p, mt, gid) \
+diff --git a/src/include/nci_defs_extns.h b/src/include/nci_defs_extns.h
+new file mode 100755
+index 000000000..806cc82ca
+--- /dev/null
++++ b/src/include/nci_defs_extns.h
+@@ -0,0 +1,61 @@
++/******************************************************************************
++ *
++ *  Copyright 2019 NXP
++ *
++ *  Licensed under the Apache License, Version 2.0 (the "License");
++ *  you may not use this file except in compliance with the License.
++ *  You may obtain a copy of the License at
++ *
++ *  http://www.apache.org/licenses/LICENSE-2.0
++ *
++ *  Unless required by applicable law or agreed to in writing, software
++ *  distributed under the License is distributed on an "AS IS" BASIS,
++ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ *  See the License for the specific language governing permissions and
++ *  limitations under the License.
++ *
++ *
++ ******************************************************************************/
++#pragma once
++
++#define NFA_STATUS_READ_ONLY NCI_STATUS_READ_ONLY
++#define NCI_STATUS_READ_ONLY 0xC4
++
++/* below  Errors for  when P2P_ERROR_CONNECT_FAIL_EVT Trigger*/
++/* Peer Doesn't support connection-oriented link  */
++#define LLCP_STATUS_CO_LINK_NOT_SUPPORTED 3
++/* SSAP is not Registered */
++#define LLCP_STATUS_SSAP_NOT_REG 4
++/* Service Name is too Long */
++#define LLCP_STATUS_SN_TOO_LONG 5
++/* Data link  MIU shall not be bigger than local link MIU */
++#define LLCP_STATUS_INVALID_MIU 6
++/* Pending Connecting request on this registered */
++#define LLCP_STATUS_BUSY 7
++
++/* Error Type when LLCP connect Failed*/
++#define LLCP_ERROR_CONNECT_FAIL_EVT 0x01
++
++enum {
++  P2P_ERROR_INVALID_HANDLE_EVT =
++      0x00,                    // Event for invalid ID which is not registered
++  P2P_ERROR_CONNECT_FAIL_EVT,  // Event when LLCP Connection Failed
++  P2P_ERROR_LINK_LOSS_EVT      // Event for lInk Loss.
++};
++
++enum {
++  P2P_CONNECT_FAIL_CO_LINK_NOT_SUPPORTED =
++      0x00,  // Peer Doesn't support connection-oriented link
++  P2P_CONNECT_FAIL_SSAP_NOT_REG, /* SSAP is not Registered           */
++  P2P_CONNECT_FAIL_SN_TOO_LONG,  /* Service Name is too LOng           */
++  P2P_CONNECT_FAIL_INVALID_MIU, /* Data link  MIU shall not be bigger than local
++                                   link MIU */
++  P2P_CONNECT_FAIL_BUSY /* Pending Connecting request on this registered */
++};
++
++enum {
++  P2P_LINK_LOSS_LOCAL_INITIATED = 0x00,
++  P2P_LINK_LOSS_TIMEOUT,
++  P2P_LINK_LOSS_REMOTE_INITIATED,
++  P2P_LINK_LOSS_RF_LINK_LOSS_ERR
++};
+diff --git a/src/include/nfc_config.h b/src/include/nfc_config.h
+index 49fac3504..22dff9257 100644
+--- a/src/include/nfc_config.h
++++ b/src/include/nfc_config.h
+@@ -77,6 +77,8 @@
+ #define NAME_DEFAULT_ISODEP_ROUTE "DEFAULT_ISODEP_ROUTE"
+ #if(NXP_EXTNS == TRUE)
+ #define NAME_NXP_AGC_DEBUG_ENABLE "NXP_AGC_DEBUG_ENABLE"
++#define NAME_NXP_T4T_NFCEE_ENABLE "NXP_T4T_NFCEE_ENABLE"
++#define NAME_DEFAULT_T4TNFCEE_AID_POWER_STATE "DEFAULT_T4TNFCEE_AID_POWER_STATE"
+ #endif
+ 
+ class NfcConfig {
+diff --git a/src/include/nfc_target.h b/src/include/nfc_target.h
+index 8cf8c6194..4ca5e7ff2 100644
+--- a/src/include/nfc_target.h
++++ b/src/include/nfc_target.h
+@@ -628,8 +628,8 @@
+ 
+ /* Max number of NFCEE supported */
+ #ifndef NFA_EE_MAX_EE_SUPPORTED
+-/* Modified for NFC-A until we add dynamic support */
+-#define NFA_EE_MAX_EE_SUPPORTED 4
++/*Including T4T NFCEE by incrementing 1*/
++#define NFA_EE_MAX_EE_SUPPORTED 5
+ #endif
+ 
+ /* Maximum number of AID entries per target_handle  */
+diff --git a/src/nfa/dm/nfa_dm_act.cc b/src/nfa/dm/nfa_dm_act.cc
+index aa494fb36..db6352211 100644
+--- a/src/nfa/dm/nfa_dm_act.cc
++++ b/src/nfa/dm/nfa_dm_act.cc
+@@ -47,6 +47,10 @@ using android::base::StringPrintf;
+ 
+ extern bool nfc_debug_enabled;
+ 
++#if (NXP_EXTNS == TRUE)
++extern void nfa_t4tnfcee_deinit(void);
++#endif
++
+ /* This is the timeout value to guarantee disable is performed within reasonable
+  * amount of time */
+ #ifndef NFA_DM_DISABLE_TIMEOUT_VAL
+@@ -498,6 +502,9 @@ bool nfa_dm_disable(tNFA_DM_MSG* p_data) {
+                         NFA_DM_DISABLE_TIMEOUT_VAL);
+   }
+ 
++  #if (NXP_EXTNS == TRUE)
++  nfa_t4tnfcee_deinit();
++  #endif
+   /* Disable all subsystems other than DM (DM will be disabled after all  */
+   /* the other subsystem have been disabled)                              */
+   nfa_sys_disable_subsystems(p_data->disable.graceful);
+diff --git a/src/nfa/dm/nfa_dm_api.cc b/src/nfa/dm/nfa_dm_api.cc
+index 20b17302f..f9d5a981f 100644
+--- a/src/nfa/dm/nfa_dm_api.cc
++++ b/src/nfa/dm/nfa_dm_api.cc
+@@ -16,6 +16,26 @@
+  *
+  ******************************************************************************/
+ 
++/******************************************************************************
++ *
++ *  The original Work has been changed by NXP.
++ *
++ *  Licensed under the Apache License, Version 2.0 (the "License");
++ *  you may not use this file except in compliance with the License.
++ *  You may obtain a copy of the License at
++ *
++ *  http://www.apache.org/licenses/LICENSE-2.0
++ *
++ *  Unless required by applicable law or agreed to in writing, software
++ *  distributed under the License is distributed on an "AS IS" BASIS,
++ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ *  See the License for the specific language governing permissions and
++ *  limitations under the License.
++ *
++ *  Copyright 2018-2021 NXP
++ *
++ ******************************************************************************/
++
+ /******************************************************************************
+  *
+  *  NFA interface for device management
+@@ -31,10 +51,18 @@
+ #include "nfa_api.h"
+ #include "nfa_ce_int.h"
+ 
++#if (NXP_EXTNS == TRUE)
++#include "nfa_sys_int.h"
++#endif
++
+ using android::base::StringPrintf;
+ 
+ extern bool nfc_debug_enabled;
+ 
++#if (NXP_EXTNS == TRUE)
++extern void nfa_t4tnfcee_init();
++#endif
++
+ /*****************************************************************************
+ **  Constants
+ *****************************************************************************/
+@@ -67,7 +95,9 @@ void NFA_Init(tHAL_NFC_ENTRY* p_hal_entry_tbl) {
+   nfa_ee_init();
+   if (nfa_ee_max_ee_cfg != 0) {
+     nfa_dm_cb.get_max_ee = p_hal_entry_tbl->get_max_ee;
+-    nfa_hci_init();
++    #if (NXP_EXTNS == TRUE)
++      nfa_t4tnfcee_init();
++    #endif
+   }
+ 
+   /* Initialize NFC module */
+@@ -936,7 +966,13 @@ tNFA_STATUS NFA_SendRawFrame(uint8_t* p_raw_data, uint16_t data_len,
+   DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("data_len:%d", data_len);
+ 
+   /* Validate parameters */
+-  if ((data_len == 0) || (p_raw_data == nullptr))
++#if (NXP_EXTNS == TRUE)
++    if (((data_len == 0 ) || (p_raw_data == nullptr))
++      && (!(nfa_dm_cb.disc_cb.disc_state == NFA_DM_RFST_LISTEN_ACTIVE
++      && nfa_dm_cb.disc_cb.activated_protocol == NFA_PROTOCOL_T3T)))
++#else
++    if ((data_len == 0) || (p_raw_data == nullptr))
++#endif
+     return (NFA_STATUS_INVALID_PARAM);
+ 
+   size = NFC_HDR_SIZE + NCI_MSG_OFFSET_SIZE + NCI_DATA_HDR_SIZE + data_len;
+@@ -953,7 +989,13 @@ tNFA_STATUS NFA_SendRawFrame(uint8_t* p_raw_data, uint16_t data_len,
+     p_msg->len = data_len;
+ 
+     p = (uint8_t*)(p_msg + 1) + p_msg->offset;
++#if (NXP_EXTNS == TRUE)
++    if(p_raw_data != nullptr) {
++      memcpy (p, p_raw_data, data_len);
++    }
++#else
+     memcpy(p, p_raw_data, data_len);
++#endif
+ 
+     nfa_sys_sendmsg(p_msg);
+ 
+diff --git a/src/nfa/dm/nfa_dm_discover.cc b/src/nfa/dm/nfa_dm_discover.cc
+index 09254343f..2eeb8427a 100644
+--- a/src/nfa/dm/nfa_dm_discover.cc
++++ b/src/nfa/dm/nfa_dm_discover.cc
+@@ -159,9 +159,10 @@ static uint8_t nfa_dm_get_rf_discover_config(
+     }
+   }
+   /* Check listening A */
+-  if (dm_disc_mask &
+-      (NFA_DM_DISC_MASK_LA_T1T | NFA_DM_DISC_MASK_LA_T2T |
+-       NFA_DM_DISC_MASK_LA_ISO_DEP | NFA_DM_DISC_MASK_LA_NFC_DEP)) {
++  if ((dm_disc_mask &
++       (NFA_DM_DISC_MASK_LA_T1T | NFA_DM_DISC_MASK_LA_T2T |
++        NFA_DM_DISC_MASK_LA_ISO_DEP | NFA_DM_DISC_MASK_LA_NFC_DEP))) {
++
+     disc_params[num_params].type = NFC_DISCOVERY_TYPE_LISTEN_A;
+     disc_params[num_params].frequency = 1;
+     num_params++;
+diff --git a/src/nfa/ee/nfa_ee_act.cc b/src/nfa/ee/nfa_ee_act.cc
+index 9fad48c9f..712ff979b 100644
+--- a/src/nfa/ee/nfa_ee_act.cc
++++ b/src/nfa/ee/nfa_ee_act.cc
+@@ -31,6 +31,11 @@
+ #include "nfa_ee_int.h"
+ #include "nfa_hci_int.h"
+ 
++ #if (NXP_EXTNS == TRUE)
++#include "nfa_nfcee_int.h"
++#include "nfc_config.h"
++ #endif
++
+ #include <statslog.h>
+ #include "metrics.h"
+ 
+@@ -109,6 +114,11 @@ static void nfa_ee_report_discover_req_evt(void);
+ static void nfa_ee_build_discover_req_evt(tNFA_EE_DISCOVER_REQ* p_evt_data);
+ void nfa_ee_check_set_routing(uint16_t new_size, int* p_max_len, uint8_t* p,
+                               int* p_cur_offset);
++
++#if (NXP_EXTNS == TRUE)
++static void nfa_ee_add_t4tnfcee_aid(uint8_t* p, int* cur_offset);
++#endif
++
+ /*******************************************************************************
+ **
+ ** Function         nfa_ee_trace_aid
+@@ -1949,6 +1959,14 @@ void nfa_ee_nci_disc_ntf(tNFA_EE_MSG* p_data) {
+       }
+     }
+ 
++    if (p_ee->nfcee_id == T4TNFCEE_TARGET_HANDLE) {
++      nfa_t4tnfcee_set_ee_cback(p_cb);
++      p_info = &evt_data.new_ee;
++      p_info->ee_handle = (tNFA_HANDLE)p_cb->nfcee_id;
++      p_info->ee_status = p_cb->ee_status;
++      nfa_ee_report_event(p_cb->p_ee_cback, NFA_EE_DISCOVER_EVT, &evt_data);
++    }
++
+     if ((nfa_ee_cb.p_ee_disc_cback == nullptr) && (notify_new_ee == true)) {
+       if (nfa_dm_is_active() && (p_cb->ee_status != NFA_EE_STATUS_REMOVED)) {
+         /* report this NFA_EE_NEW_EE_EVT only after NFA_DM_ENABLE_EVT is
+@@ -2414,6 +2432,13 @@ void nfa_ee_nci_disc_req_ntf(tNFA_EE_MSG* p_data) {
+                  NFC_DISCOVERY_TYPE_LISTEN_B_PRIME) {
+         p_cb->lbp_protocol = p_cbk->info[xx].protocol;
+       }
++      #if (NXP_EXTNS == TRUE)
++      if (p_cb->nfcee_id == T4TNFCEE_TARGET_HANDLE) {
++        tNFA_EE_CBACK_DATA nfa_ee_cback_data = {0};
++        nfa_ee_report_event(p_cb->p_ee_cback, NFA_EE_DISCOVER_REQ_EVT,
++                            &nfa_ee_cback_data);
++      }
++      #endif
+       DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
+           "nfcee_id=0x%x ee_status=0x%x ecb_flags=0x%x la_protocol=0x%x "
+           "la_protocol=0x%x la_protocol=0x%x",
+@@ -2774,6 +2799,9 @@ void nfa_ee_lmrt_to_nfcc(__attribute__((unused)) tNFA_EE_MSG* p_data) {
+   max_len = (NFC_GetLmrtSize() > NFA_EE_ROUT_BUF_SIZE) ? NFC_GetLmrtSize()
+                                                        : NFA_EE_ROUT_BUF_SIZE;
+   p = (uint8_t*)GKI_getbuf(max_len);
++  #if (NXP_EXTNS == TRUE)
++  if (nfa_t4tnfcee_is_enabled()) nfa_ee_add_t4tnfcee_aid(p, &cur_offset);
++  #endif
+   if (p == nullptr) {
+     LOG(ERROR) << StringPrintf("no buffer to send routing info.");
+     tNFA_EE_CBACK_DATA nfa_ee_cback_data;
+@@ -2869,3 +2897,47 @@ void nfa_ee_update_rout(void) {
+       << StringPrintf("nfa_ee_update_rout ee_cfg_sts:0x%02x ee_cfged:0x%02x",
+                       nfa_ee_cb.ee_cfg_sts, nfa_ee_cb.ee_cfged);
+ }
++
++#if(NXP_EXTNS == TRUE)
++/*******************************************************************************
++**
++** Function         nfa_ee_add_t4tnfcee_aid
++**
++** Description      Adds t4t Nfcee AID at the beginning top of routing table
++**
++** Returns          none
++**
++*******************************************************************************/
++static void nfa_ee_add_t4tnfcee_aid(uint8_t* p, int* cur_offset) {
++  const uint8_t t4tNfcee[] = {0xD2, 0x76, 0x00, 0x00, 0x85, 0x01, 0x01};
++  int t4tNfceeRoute = T4TNFCEE_TARGET_HANDLE;
++  unsigned long t4tNfceePower = 0x00;
++  uint8_t* pp;
++  t4tNfceePower =
++      NfcConfig::getUnsigned(NAME_DEFAULT_T4TNFCEE_AID_POWER_STATE, 0x00);
++  if (!t4tNfceePower) {
++    DLOG_IF(INFO, nfc_debug_enabled)
++        << StringPrintf("t4tNfceePower not found; taking default value");
++    t4tNfceePower = (NCI_ROUTE_PWR_STATE_ON | NCI_ROUTE_PWR_STATE_SWITCH_OFF);
++    t4tNfceePower |= NCI_ROUTE_PWR_STATE_SCREEN_ON_LOCK();
++    t4tNfceePower |= NCI_ROUTE_PWR_STATE_SCREEN_OFF_UNLOCK();
++    t4tNfceePower |= NCI_ROUTE_PWR_STATE_SCREEN_OFF_LOCK();
++  } else {
++    t4tNfceePower = T4TNFCEE_AID_POWER_STATE;
++  }
++
++  /*Number of Entries. Current Entry 1.
++   *Later same values will be incremented with required number of entries
++   */
++  *p = 0x01;
++  pp = p + 1;
++  *pp++ = NFC_ROUTE_TAG_AID;
++  *pp++ = sizeof(t4tNfcee) + 2;  // sizeof(t4tNfcee) + size(t4tNfceeRoute):1byte
++                                 // + size(t4tNfceePower):1byte
++  *pp++ = t4tNfceeRoute;
++  *pp++ = (uint8_t)t4tNfceePower;
++  memcpy(pp, t4tNfcee, sizeof(t4tNfcee));
++
++  *cur_offset = (uint8_t)(pp - (p + 1)) + sizeof(t4tNfcee);
++}
++#endif
+diff --git a/src/nfa/hci/nfa_hci_main.cc b/src/nfa/hci/nfa_hci_main.cc
+index 2ee1e0384..ddc9b834e 100644
+--- a/src/nfa/hci/nfa_hci_main.cc
++++ b/src/nfa/hci/nfa_hci_main.cc
+@@ -163,12 +163,11 @@ void nfa_hci_ee_info_cback(tNFA_EE_DISC_STS status) {
+     case NFA_EE_MODE_SET_COMPLETE:
+       /*received mode set Ntf */
+       if ((nfa_hci_cb.hci_state == NFA_HCI_STATE_WAIT_NETWK_ENABLE) ||
+-          (nfa_hci_cb.hci_state == NFA_HCI_STATE_RESTORE_NETWK_ENABLE) ||
+-          (nfa_hci_cb.hci_state == NFA_HCI_STATE_EE_RECOVERY)) {
+-        /* Discovery operation is complete, retrieve discovery result */
+-        NFA_EeGetInfo(&nfa_hci_cb.num_nfcee, nfa_hci_cb.ee_info);
+-        nfa_hci_enable_one_nfcee();
+-      }
++                (nfa_hci_cb.hci_state == NFA_HCI_STATE_RESTORE_NETWK_ENABLE)) {
++              /* Discovery operation is complete, retrieve discovery result */
++          NFA_EeGetInfo(&nfa_hci_cb.num_nfcee, nfa_hci_cb.ee_info);
++          nfa_hci_enable_one_nfcee();
++        }
+       break;
+     case NFA_EE_RECOVERY_INIT:
+       /*NFCEE recovery in progress*/
+diff --git a/src/nfa/include/nfa_nfcee_api.h b/src/nfa/include/nfa_nfcee_api.h
+new file mode 100644
+index 000000000..d93d24d6c
+--- /dev/null
++++ b/src/nfa/include/nfa_nfcee_api.h
+@@ -0,0 +1,91 @@
++/******************************************************************************
++ *
++ *  Copyright 2019 NXP
++ *
++ *  Licensed under the Apache License, Version 2.0 (the "License");
++ *  you may not use this file except in compliance with the License.
++ *  You may obtain a copy of the License at
++ *
++ *  http://www.apache.org/licenses/LICENSE-2.0
++ *
++ *  Unless required by applicable law or agreed to in writing, software
++ *  distributed under the License is distributed on an "AS IS" BASIS,
++ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ *  See the License for the specific language governing permissions and
++ *  limitations under the License.
++ *
++ ******************************************************************************/
++#pragma once
++/*******************************************************************************
++**
++** Function         NFA_T4tNfcEeOpenConnection
++**
++** Description      Creates logical connection with T4T Nfcee
++**
++** Returns:
++**                  NFA_STATUS_OK if successfully initiated
++**                  NFA_STATUS_FAILED otherwise
++**
++*******************************************************************************/
++tNFA_STATUS NFA_T4tNfcEeOpenConnection();
++
++/*******************************************************************************
++**
++** Function         NFA_T4tNfcEeClear
++**
++** Description      Clear Ndef data to T4T NFC EE.
++**                  For file ID NDEF, perform the NDEF detection procedure
++**                  and set the NDEF tag data to zero.
++** Returns:
++**                  NFA_STATUS_OK if successfully initiated
++**                  NFA_STATUS_FAILED otherwise
++**
++*******************************************************************************/
++tNFA_STATUS NFA_T4tNfcEeClear(uint8_t* p_fileId);
++
++/*******************************************************************************
++**
++** Function         NFA_T4tNfcEeWrite
++**
++** Description      Write data to the T4T NFC EE of given file id.
++**                  If file ID is of NDEF, perform the NDEF detection procedure
++**                  and write the NDEF tag data using the appropriate method for
++**                  NDEF EE.
++**                  If File ID is Not NDEF then reads proprietary way
++** Returns:
++**                  NFA_STATUS_OK if successfully initiated
++**                  NFA_STATUS_FAILED otherwise
++**
++*******************************************************************************/
++tNFA_STATUS NFA_T4tNfcEeWrite(uint8_t* p_fileId, uint8_t* p_data, uint32_t len);
++
++/*******************************************************************************
++**
++** Function         NFA_T4tNfcEeRead
++**
++** Description      Read T4T message from NFCC area.of given file id
++**                  If file ID is of NDEF, perform the NDEF detection
++*procedure
++**                  and read the NDEF tag data using the appropriate method
++**                  for NDEF EE.
++**                  If File ID is Not NDEF then reads proprietary way
++**
++** Returns:
++**                  NFA_STATUS_OK if successfully initiated
++**                  NFA_STATUS_FAILED otherwise
++**
++*******************************************************************************/
++tNFA_STATUS NFA_T4tNfcEeRead(uint8_t* p_fileId);
++
++/*******************************************************************************
++**
++** Function         NFA_T4tNfcEeCloseConnection
++**
++** Description      Closes logical connection with T4T Nfcee
++**
++** Returns:
++**                  NFA_STATUS_OK if successfully initiated
++**                  NFA_STATUS_FAILED otherwise
++**
++*******************************************************************************/
++tNFA_STATUS NFA_T4tNfcEeCloseConnection();
+diff --git a/src/nfa/include/nfa_nfcee_int.h b/src/nfa/include/nfa_nfcee_int.h
+new file mode 100644
+index 000000000..e1154ba75
+--- /dev/null
++++ b/src/nfa/include/nfa_nfcee_int.h
+@@ -0,0 +1,155 @@
++/******************************************************************************
++ *
++ *  Copyright 2019 NXP
++ *
++ *  Licensed under the Apache License, Version 2.0 (the "License");
++ *  you may not use this file except in compliance with the License.
++ *  You may obtain a copy of the License at
++ *
++ *  http://www.apache.org/licenses/LICENSE-2.0
++ *
++ *  Unless required by applicable law or agreed to in writing, software
++ *  distributed under the License is distributed on an "AS IS" BASIS,
++ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ *  See the License for the specific language governing permissions and
++ *  limitations under the License.
++ *
++ ******************************************************************************/
++#pragma once
++#include "nfa_ee_int.h"
++#include "nfa_sys.h"
++using namespace std;
++
++#define CC_FILE_ID 0xE103
++#define NDEF_FILE_ID 0xE104
++#define PROP_FILE_ID_1 0xE105
++#define PROP_FILE_ID_2 0xE106
++#define PROP_FILE_ID_3 0xE107
++#define PROP_FILE_ID_4 0xE108
++
++#define T4TNFCEE_TARGET_HANDLE 0x10
++#define T4TNFCEE_SIZEOF_LEN_BYTES 0x02
++#define T4TNFCEE_SIZEOF_STATUS_BYTES 0x02
++
++/*CLA + INS + P1 + P2 + LC*/
++#define CAPDU_TL 0x05
++#define RW_T4TNFCEE_DATA_PER_WRITE (T4T_MAX_LENGTH_LC - CAPDU_TL)
++
++/*
++POWER_STATE:
++bit pos 0 = Switch On
++bit pos 1 = Switch Off
++bit pos 2 = Battery Off
++bit pos 3 = Screen On lock
++bit pos 4 = Screen off unlock
++bit pos 5 = Screen Off lock
++*/
++#define T4TNFCEE_AID_POWER_STATE 0x3B
++
++/* Event to notify T4T NFCEE Detection complete*/
++#define NFA_T4TNFCEE_EVT 40
++/* Event to notify NDEF T4TNFCEE READ complete*/
++#define NFA_T4TNFCEE_READ_CPLT_EVT 41
++/* Event to notify NDEF T4TNFCEE WRITE complete*/
++#define NFA_T4TNFCEE_WRITE_CPLT_EVT 42
++/* Event to notify NDEF T4TNFCEE CLEAR complete*/
++#define NFA_T4TNFCEE_CLEAR_CPLT_EVT 43
++
++#define T4T_NFCEE_READ_ALLOWED 0x00
++#define T4T_NFCEE_WRITE_NOT_ALLOWED 0xFF
++
++/*Staus codes*/
++#define NFA_T4T_STATUS_INVALID_FILE_ID   0x05
++
++typedef struct {
++  uint16_t capacity;
++  uint8_t read_access;
++  uint8_t write_access;
++} tNFA_T4TNFCEE_FILE_INFO;
++
++enum {
++  NFA_T4TNFCEE_OP_OPEN_CONNECTION,
++  NFA_T4TNFCEE_OP_READ,
++  NFA_T4TNFCEE_OP_WRITE,
++  NFA_T4TNFCEE_OP_CLOSE_CONNECTION,
++  NFA_T4TNFCEE_OP_CLEAR,
++  NFA_T4TNFCEE_OP_MAX
++};
++typedef uint8_t tNFA_T4TNFCEE_OP;
++
++typedef struct {
++  uint32_t len;
++  uint8_t* p_data;
++} tNFA_T4TNFCEE_OP_PARAMS_WRITE;
++
++/* NDEF EE  events */
++enum {
++  NFA_T4TNFCEE_OP_REQUEST_EVT = NFA_SYS_EVT_START(NFA_ID_T4TNFCEE),
++  NFA_T4TNFCEE_MAX_EVT
++};
++
++/* data type for NFA_T4TNFCEE_op_req_EVT */
++typedef struct {
++  NFC_HDR hdr;
++  tNFA_T4TNFCEE_OP op; /* NFA T4TNFCEE operation */
++  uint8_t* p_fileId;
++  tNFA_T4TNFCEE_OP_PARAMS_WRITE write;
++} tNFA_T4TNFCEE_OPERATION;
++
++/* union of all data types */
++typedef union {
++  /* GKI event buffer header */
++  NFC_HDR hdr;
++  tNFA_T4TNFCEE_OPERATION op_req;
++} tNFA_T4TNFCEE_MSG;
++
++typedef enum {
++  /* NFA T4TNFCEE states */
++  NFA_T4TNFCEE_STATE_DISABLED = 0x00, /* T4TNFCEE is disabled  */
++  NFA_T4TNFCEE_STATE_TRY_ENABLE,
++  NFA_T4TNFCEE_STATE_INITIALIZED,  /* T4TNFCEE is waiting to handle api commands
++                                    */
++  NFA_T4TNFCEE_STATE_CONNECTED,    /* T4TNFCEE is in open sequence */
++  NFA_T4TNFCEE_STATE_DISCONNECTED, /* T4TNFCEE is in closing sequence */
++  NFA_T4TNFCEE_STATE_OPEN_FAILED   /* T4TNFCEE OPEN Failed */
++} tNFA_T4TNFCEE_STATE;
++
++typedef enum {
++  PROP_DISABLED = 0x00,
++  WAIT_SELECT_APPLICATION,
++  WAIT_SELECT_CC,
++  WAIT_READ_CC_DATA_LEN,
++  WAIT_READ_CC_FILE,
++  WAIT_SELECT_FILE,
++  WAIT_READ_DATA_LEN,
++  WAIT_READ_FILE,
++  WAIT_RESET_NLEN,
++  WAIT_WRITE,
++  WAIT_WRITE_COMPLETE,
++  WAIT_UPDATE_NLEN,
++  WAIT_CLEAR_NDEF_DATA,
++  OP_COMPLETE = 0x00
++} tNFA_T4TNFCEE_RW_STATE;
++/* NFA T4TNFCEE control block */
++typedef struct {
++  tNFA_STATUS status;
++  tNFA_T4TNFCEE_STATE t4tnfcee_state;
++  tNFA_T4TNFCEE_OP cur_op; /* Current operation */
++  tNFA_T4TNFCEE_RW_STATE prop_rw_state;
++  tNFA_T4TNFCEE_MSG* p_pending_msg;
++  uint8_t* p_dataBuf;
++  uint16_t cur_fileId;
++  uint16_t rd_offset;
++  uint32_t dataLen;
++} tNFA_T4TNFCEE_CB;
++extern tNFA_T4TNFCEE_CB nfa_t4tnfcee_cb;
++
++/* type definition for action functions */
++typedef bool (*tNFA_T4TNFCEE_ACTION)(tNFA_T4TNFCEE_MSG* p_data);
++
++bool nfa_t4tnfcee_handle_op_req(tNFA_T4TNFCEE_MSG* p_data);
++bool nfa_t4tnfcee_handle_event(NFC_HDR* p_msg);
++void nfa_t4tnfcee_free_rx_buf(void);
++bool nfa_t4tnfcee_is_enabled(void);
++bool nfa_t4tnfcee_is_processing(void);
++void nfa_t4tnfcee_set_ee_cback(tNFA_EE_ECB* p_ecb);
+diff --git a/src/nfa/include/nfa_sys.h b/src/nfa/include/nfa_sys.h
+index 42d846447..81f321d0c 100644
+--- a/src/nfa/include/nfa_sys.h
++++ b/src/nfa/include/nfa_sys.h
+@@ -44,6 +44,9 @@ enum {
+   NFA_ID_HCI,  /* Host controller interface sub-system*/
+ #if (NFA_DTA_INCLUDED == TRUE)
+   NFA_ID_DTA, /* Device Test Application sub-system  */
++#endif
++#if (NXP_EXTNS == TRUE)
++  NFA_ID_T4TNFCEE, /* t4T Nfcee sub-system  */
+ #endif
+   NFA_ID_MAX
+ };
+diff --git a/src/nfa/t4tnfcee/nfa_nfcee_act.cc b/src/nfa/t4tnfcee/nfa_nfcee_act.cc
+new file mode 100644
+index 000000000..233fd1688
+--- /dev/null
++++ b/src/nfa/t4tnfcee/nfa_nfcee_act.cc
+@@ -0,0 +1,680 @@
++/******************************************************************************
++ *
++ *  Copyright 2019-2020 NXP
++ *
++ *  Licensed under the Apache License, Version 2.0 (the "License");
++ *  you may not use this file except in compliance with the License.
++ *  You may obtain a copy of the License at
++ *
++ *  http://www.apache.org/licenses/LICENSE-2.0
++ *
++ *  Unless required by applicable law or agreed to in writing, software
++ *  distributed under the License is distributed on an "AS IS" BASIS,
++ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ *  See the License for the specific language governing permissions and
++ *  limitations under the License.
++ *
++ ******************************************************************************/
++#if (NXP_EXTNS == TRUE)
++#include <android-base/stringprintf.h>
++#include <base/logging.h>
++#include <string.h>
++#include <iomanip>
++#include <unordered_map>
++#include "ndef_utils.h"
++#include "nfa_dm_int.h"
++#include "nfa_mem_co.h"
++#include "nfa_nfcee_int.h"
++#include "nci_defs_extns.h"
++
++using android::base::StringPrintf;
++
++extern bool nfc_debug_enabled;
++extern tNFC_STATUS nfa_t4tnfcee_proc_disc_evt(tNFA_T4TNFCEE_OP event);
++
++void nfa_t4tnfcee_handle_t4t_evt(tRW_EVENT event, tRW_DATA* p_data);
++void nfa_t4tnfcee_store_cc_info(NFC_HDR* p_data);
++void nfa_t4tnfcee_notify_rx_evt(void);
++void nfa_t4tnfcee_handle_file_operations(tRW_DATA* p_rwData);
++bool isReadPermitted(void);
++bool isWritePermitted(void);
++bool isDataLenBelowMaxFileCapacity(void);
++void nfa_t4tnfcee_store_rx_buf(NFC_HDR* p_data);
++void nfa_t4tnfcee_initialize_data(tNFA_T4TNFCEE_MSG* p_data);
++bool is_read_precondition_valid(tNFA_T4TNFCEE_MSG* p_data);
++bool is_write_precondition_valid(tNFA_T4TNFCEE_MSG* p_data);
++uint16_t nfa_t4tnfcee_get_len(tRW_DATA* p_rwData);
++tNFC_STATUS getWritePreconditionStatus();
++bool isError(tNFC_STATUS status);
++unordered_map<uint16_t, tNFA_T4TNFCEE_FILE_INFO> ccFileInfo;
++
++/*******************************************************************************
++ **
++ ** Function         nfa_t4tnfcee_free_rx_buf
++ **
++ ** Description      Free buffer allocated to hold incoming T4T message
++ **
++ ** Returns          Nothing
++ **
++ *******************************************************************************/
++void nfa_t4tnfcee_free_rx_buf(void) {
++  /*Free only if it is Read operation
++  For write, buffer will be passed from JNI which will be freed by JNI*/
++  if (((nfa_t4tnfcee_cb.cur_op == NFA_T4TNFCEE_OP_READ) ||
++       (nfa_t4tnfcee_cb.cur_op == NFA_T4TNFCEE_OP_CLEAR)) &&
++      nfa_t4tnfcee_cb.p_dataBuf) {
++    nfa_mem_co_free(nfa_t4tnfcee_cb.p_dataBuf);
++    nfa_t4tnfcee_cb.p_dataBuf = NULL;
++  }
++  nfa_t4tnfcee_cb.rd_offset = 0x00;
++  nfa_t4tnfcee_cb.dataLen = 0x00;
++}
++
++/*******************************************************************************
++ **
++ ** Function         nfa_t4tnfcee_exec_file_operation
++ **
++ ** Description      Handles read sequence for Ndef and proprietary
++ **
++ ** Returns          tNFA_STATUS
++ **
++ *******************************************************************************/
++tNFA_STATUS nfa_t4tnfcee_exec_file_operation() {
++  tNFA_STATUS status = NFA_STATUS_FAILED;
++  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s Enter", __func__);
++  status = RW_SetT4tNfceeInfo((tRW_CBACK*)nfa_t4tnfcee_handle_t4t_evt,
++                              NCI_DEST_TYPE_T4T_NFCEE);
++  if (status != NFA_STATUS_OK) {
++    DLOG_IF(INFO, nfc_debug_enabled)
++        << StringPrintf("%s T4T info not able to set. Return", __func__);
++    return status;
++  }
++  status = RW_T4tNfceeSelectApplication();
++  if (status != NFA_STATUS_OK) {
++    DLOG_IF(INFO, nfc_debug_enabled)
++        << StringPrintf("%s T4T Select application failed", __func__);
++    return status;
++  } else {
++    nfa_t4tnfcee_cb.prop_rw_state = WAIT_SELECT_APPLICATION;
++    return NFA_STATUS_OK;
++  }
++}
++
++/*******************************************************************************
++ **
++ ** Function         nfa_t4tnfcee_handle_op_req
++ **
++ ** Description      Handler for NFA_T4TNFCEE_OP_REQUEST_EVT, operation request
++ **
++ ** Returns          true if caller should free p_data
++ **                  false if caller does not need to free p_data
++ **
++ *******************************************************************************/
++bool nfa_t4tnfcee_handle_op_req(tNFA_T4TNFCEE_MSG* p_data) {
++  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
++      "nfa_t4tnfcee_handle_op_req: op=0x%02x", p_data->op_req.op);
++  nfa_t4tnfcee_cb.cur_op = p_data->op_req.op;
++
++  /* Call appropriate handler for requested operation */
++  switch (p_data->op_req.op) {
++    case NFA_T4TNFCEE_OP_OPEN_CONNECTION: {
++      nfa_t4tnfcee_proc_disc_evt(NFA_T4TNFCEE_OP_OPEN_CONNECTION);
++    } break;
++    case NFA_T4TNFCEE_OP_READ: {
++      if (!is_read_precondition_valid(p_data)) {
++        DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s Failed", __func__);
++        nfa_t4tnfcee_cb.status = NFA_STATUS_INVALID_PARAM;
++        nfa_t4tnfcee_notify_rx_evt();
++        break;
++      }
++      nfa_t4tnfcee_initialize_data(p_data);
++      tNFA_STATUS status = nfa_t4tnfcee_exec_file_operation();
++      if (status != NFA_STATUS_OK) {
++        nfa_t4tnfcee_cb.status = NFA_STATUS_FAILED;
++        nfa_t4tnfcee_notify_rx_evt();
++      }
++    } break;
++    case NFA_T4TNFCEE_OP_WRITE: {
++      if (!is_write_precondition_valid(p_data)) {
++        DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s Failed", __func__);
++        nfa_t4tnfcee_cb.status = NFA_STATUS_INVALID_PARAM;
++        nfa_t4tnfcee_notify_rx_evt();
++        break;
++      }
++      nfa_t4tnfcee_initialize_data(p_data);
++      if ((p_data->op_req.write.p_data != nullptr) &&
++          (p_data->op_req.write.len > 0)) {
++        nfa_t4tnfcee_cb.p_dataBuf = p_data->op_req.write.p_data;
++        nfa_t4tnfcee_cb.dataLen = p_data->op_req.write.len;
++      }
++      tNFA_STATUS status = nfa_t4tnfcee_exec_file_operation();
++      if (status != NFA_STATUS_OK) {
++        nfa_t4tnfcee_cb.status = NFA_STATUS_FAILED;
++        nfa_t4tnfcee_notify_rx_evt();
++      }
++    } break;
++    case NFA_T4TNFCEE_OP_CLEAR: {
++      nfa_t4tnfcee_initialize_data(p_data);
++      tNFA_STATUS status = nfa_t4tnfcee_exec_file_operation();
++      if (status != NFA_STATUS_OK) {
++        nfa_t4tnfcee_cb.status = NFA_STATUS_FAILED;
++        nfa_t4tnfcee_notify_rx_evt();
++      }
++      break;
++    }
++    case NFA_T4TNFCEE_OP_CLOSE_CONNECTION: {
++      nfa_t4tnfcee_proc_disc_evt(NFA_T4TNFCEE_OP_CLOSE_CONNECTION);
++    } break;
++    default:
++      break;
++  }
++  return true;
++}
++
++/*******************************************************************************
++ **
++ ** Function     nfa_t4tnfcee_check_sw
++ **
++ ** Description  Updates the status if R-APDU has been received with failure status
++ **
++ ** Returns      Nothing
++ **
++ *******************************************************************************/
++static void nfa_t4tnfcee_check_sw(tRW_DATA* p_rwData) {
++  uint8_t *p; uint16_t status_words;
++  NFC_HDR* p_r_apdu=  p_rwData->raw_frame.p_data;
++  p = (uint8_t*)(p_r_apdu + 1) + p_r_apdu->offset;
++  p += (p_r_apdu->len - T4T_RSP_STATUS_WORDS_SIZE);
++  BE_STREAM_TO_UINT16(status_words, p);
++  if ((status_words != T4T_RSP_CMD_CMPLTED) &&
++      (!T4T_RSP_WARNING_PARAMS_CHECK(status_words >> 8))) {
++    p_rwData->raw_frame.status = NFC_STATUS_FAILED;
++    DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("status 0x%X",status_words);
++  }
++}
++/*******************************************************************************
++ **
++ ** Function         nfa_t4tnfcee_handle_t4t_evt
++ **
++ ** Description      Handler for Type-4 NFCEE reader/writer events
++ **
++ ** Returns          Nothing
++ **
++ *******************************************************************************/
++void nfa_t4tnfcee_handle_t4t_evt(tRW_EVENT event, tRW_DATA* p_rwData) {
++  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
++      "%s: Enter event=0x%02x 0x%02x", __func__, event, p_rwData->status);
++  switch (event) {
++    case RW_T4T_RAW_FRAME_EVT:
++      nfa_t4tnfcee_check_sw(p_rwData);
++      DLOG_IF(INFO, nfc_debug_enabled)
++          << StringPrintf("%s RW_T4T_RAW_FRAME_EVT", __func__);
++      nfa_t4tnfcee_handle_file_operations(p_rwData);
++      break;
++    case RW_T4T_INTF_ERROR_EVT:
++      DLOG_IF(INFO, nfc_debug_enabled)
++              << StringPrintf("%s RW_T4T_INTF_ERROR_EVT", __func__);
++      nfa_t4tnfcee_handle_file_operations(p_rwData);
++      break;
++    default:
++      DLOG_IF(INFO, nfc_debug_enabled)
++          << StringPrintf("%s UNKNOWN EVENT", __func__);
++      break;
++  }
++  return;
++}
++
++/*******************************************************************************
++ **
++ ** Function         nfa_t4tnfcee_store_cc_info
++ **
++ ** Description      stores CC info into local data structure
++ **
++ ** Returns          Nothing
++ **
++ *******************************************************************************/
++void nfa_t4tnfcee_store_cc_info(NFC_HDR* p_data) {
++  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s Enter", __func__);
++
++  uint16_t keyFileId;
++  string valueFileLength;
++  const uint8_t skipTL = 0x02, tlvLen = 0x08;
++  uint8_t jumpToFirstTLV = 0x03; /*Le index*/
++  uint16_t RemainingDataLen = 0;
++  uint8_t* ccInfo;
++
++  if (NULL != p_data) {
++    ccInfo = (uint8_t*)(p_data + 1) + p_data->offset + jumpToFirstTLV;
++  } else {
++    DLOG_IF(INFO, nfc_debug_enabled)
++        << StringPrintf("%s empty cc info", __func__);
++    return;
++  }
++  RW_T4tNfceeUpdateCC(ccInfo);
++  jumpToFirstTLV = 0x07;
++  ccInfo = (uint8_t*)(p_data + 1) + p_data->offset + jumpToFirstTLV;
++
++  ccFileInfo.clear();
++  RemainingDataLen =
++      (p_data->len - jumpToFirstTLV - T4TNFCEE_SIZEOF_STATUS_BYTES);
++  while (RemainingDataLen >= 0x08) {
++    tNFA_T4TNFCEE_FILE_INFO fileInfo;
++    ccInfo += skipTL;
++    BE_STREAM_TO_UINT16(keyFileId, ccInfo);
++    BE_STREAM_TO_UINT16(fileInfo.capacity, ccInfo);
++    BE_STREAM_TO_UINT8(fileInfo.read_access, ccInfo);
++    BE_STREAM_TO_UINT8(fileInfo.write_access, ccInfo);
++    ccFileInfo.insert(
++        pair<uint16_t, tNFA_T4TNFCEE_FILE_INFO>(keyFileId, fileInfo));
++    keyFileId = 0x00;
++    RemainingDataLen -= tlvLen;
++  }
++}
++
++/*******************************************************************************
++ **
++ ** Function         nfa_t4tnfcee_store_rx_buf
++ **
++ ** Description      Stores read data.
++ **
++ ** Returns          Nothing
++ **
++ *******************************************************************************/
++void nfa_t4tnfcee_store_rx_buf(NFC_HDR* p_data) {
++  uint8_t* p;
++  DLOG_IF(INFO, nfc_debug_enabled)
++      << StringPrintf("%s copying data len %d  rd_offset: %d", __func__,
++                      p_data->len, nfa_t4tnfcee_cb.rd_offset);
++  if (NULL != p_data) {
++    p = (uint8_t*)(p_data + 1) + p_data->offset;
++    memcpy(&nfa_t4tnfcee_cb.p_dataBuf[nfa_t4tnfcee_cb.rd_offset], p,
++           p_data->len);
++    nfa_t4tnfcee_cb.rd_offset += p_data->len;
++  } else {
++    DLOG_IF(INFO, nfc_debug_enabled)
++        << StringPrintf("%s Data is NULL", __func__);
++  }
++}
++
++/*******************************************************************************
++ **
++ ** Function         nfa_t4tnfcee_initialize_data
++ **
++ ** Description      Initializes control block
++ **
++ ** Returns          none
++ **
++ *******************************************************************************/
++void nfa_t4tnfcee_initialize_data(tNFA_T4TNFCEE_MSG* p_data) {
++  nfa_t4tnfcee_cb.prop_rw_state = PROP_DISABLED;
++  nfa_t4tnfcee_cb.rd_offset = 0;
++  nfa_t4tnfcee_cb.p_dataBuf = nullptr;
++  nfa_t4tnfcee_cb.dataLen = 0x00;
++  BE_STREAM_TO_UINT16(nfa_t4tnfcee_cb.cur_fileId, p_data->op_req.p_fileId);
++}
++/*******************************************************************************
++ **
++ ** Function         nfa_t4tnfcee_handle_file_operations
++ **
++ ** Description      Handles proprietary file operations
++ **
++ ** Returns          none
++ **
++ *******************************************************************************/
++void nfa_t4tnfcee_handle_file_operations(tRW_DATA* p_rwData) {
++  if (p_rwData == nullptr) {
++    nfa_t4tnfcee_cb.status = NFC_STATUS_FAILED;
++    nfa_t4tnfcee_notify_rx_evt();
++    return;
++  }
++  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
++      "%s currState : 0x%02x", __func__, nfa_t4tnfcee_cb.prop_rw_state);
++  switch (nfa_t4tnfcee_cb.prop_rw_state) {
++    case WAIT_SELECT_APPLICATION:
++      if (isError(p_rwData->raw_frame.status)) break;
++      RW_T4tNfceeSelectFile(CC_FILE_ID);
++      nfa_t4tnfcee_cb.prop_rw_state = WAIT_SELECT_CC;
++      break;
++
++    case WAIT_SELECT_CC:
++      if (isError(p_rwData->raw_frame.status)) break;
++      RW_T4tNfceeReadDataLen();
++      nfa_t4tnfcee_cb.prop_rw_state = WAIT_READ_CC_DATA_LEN;
++      break;
++
++    case WAIT_READ_CC_DATA_LEN: {
++      if (isError(p_rwData->raw_frame.status)) break;
++      uint16_t lenDataToBeRead = nfa_t4tnfcee_get_len(p_rwData);
++      if (lenDataToBeRead <= 0x00) {
++        nfa_t4tnfcee_cb.status = NFC_STATUS_NO_BUFFERS;
++        nfa_t4tnfcee_notify_rx_evt();
++        break;
++      }
++      RW_T4tNfceeReadFile(0x00, lenDataToBeRead);
++      nfa_t4tnfcee_cb.prop_rw_state = WAIT_READ_CC_FILE;
++      break;
++    }
++
++    case WAIT_READ_CC_FILE: {
++      if (isError(p_rwData->raw_frame.status)) break;
++      nfa_t4tnfcee_store_cc_info(p_rwData->raw_frame.p_data);
++      if (ccFileInfo.find(nfa_t4tnfcee_cb.cur_fileId) == ccFileInfo.end()) {
++        DLOG_IF(INFO, nfc_debug_enabled)
++            << StringPrintf("%s FileId Not found in CC", __func__);
++        nfa_t4tnfcee_cb.status = NFA_T4T_STATUS_INVALID_FILE_ID;
++        nfa_t4tnfcee_notify_rx_evt();
++        break;
++      }
++
++      RW_T4tNfceeSelectFile(nfa_t4tnfcee_cb.cur_fileId);
++      nfa_t4tnfcee_cb.prop_rw_state = WAIT_SELECT_FILE;
++      break;
++    }
++
++    case WAIT_SELECT_FILE: {
++      if (isError(p_rwData->raw_frame.status)) break;
++      if ((nfa_t4tnfcee_cb.cur_op == NFA_T4TNFCEE_OP_READ) &&
++          isReadPermitted()) {
++        RW_T4tNfceeReadDataLen();
++        nfa_t4tnfcee_cb.prop_rw_state = WAIT_READ_DATA_LEN;
++      } else if (nfa_t4tnfcee_cb.cur_op == NFA_T4TNFCEE_OP_WRITE) {
++        tNFA_STATUS preCondStatus = getWritePreconditionStatus();
++        if (preCondStatus == NFA_STATUS_OK) {
++          RW_T4tNfceeUpdateNlen(0x0000);
++          nfa_t4tnfcee_cb.prop_rw_state = WAIT_RESET_NLEN;
++        } else {
++          nfa_t4tnfcee_cb.status = preCondStatus;
++          nfa_t4tnfcee_notify_rx_evt();
++        }
++      } else if (nfa_t4tnfcee_cb.cur_op == NFA_T4TNFCEE_OP_CLEAR) {
++        RW_T4tNfceeReadDataLen();
++        nfa_t4tnfcee_cb.prop_rw_state = WAIT_CLEAR_NDEF_DATA;
++      }
++      break;
++    }
++
++    case WAIT_CLEAR_NDEF_DATA: {
++      if (isError(p_rwData->raw_frame.status)) break;
++      uint16_t lenDataToBeClear = nfa_t4tnfcee_get_len(p_rwData);
++      if (lenDataToBeClear == 0x00) {
++        nfa_t4tnfcee_cb.status = p_rwData->raw_frame.status;;
++        nfa_t4tnfcee_notify_rx_evt();
++        break;
++      }
++      RW_T4tNfceeUpdateNlen(0x0000);
++      nfa_t4tnfcee_cb.p_dataBuf = (uint8_t*)nfa_mem_co_alloc(lenDataToBeClear);
++      if(!nfa_t4tnfcee_cb.p_dataBuf) {
++        nfa_t4tnfcee_cb.status = NFC_STATUS_FAILED;
++        nfa_t4tnfcee_notify_rx_evt();
++        break;
++      }
++      memset(nfa_t4tnfcee_cb.p_dataBuf, 0, lenDataToBeClear);
++      nfa_t4tnfcee_cb.dataLen = lenDataToBeClear;
++      nfa_t4tnfcee_cb.prop_rw_state = WAIT_RESET_NLEN;
++      break;
++    }
++
++    case WAIT_READ_DATA_LEN: {
++      if (isError(p_rwData->raw_frame.status)) break;
++      uint16_t lenDataToBeRead = nfa_t4tnfcee_get_len(p_rwData);
++      if (lenDataToBeRead <= 0x00) {
++        nfa_t4tnfcee_cb.status = NFC_STATUS_NO_BUFFERS;
++        nfa_t4tnfcee_notify_rx_evt();
++        break;
++      }
++
++      nfa_t4tnfcee_cb.p_dataBuf = (uint8_t*)nfa_mem_co_alloc(lenDataToBeRead);
++      RW_T4tNfceeReadFile(T4T_FILE_LENGTH_SIZE, lenDataToBeRead);
++      nfa_t4tnfcee_cb.prop_rw_state = WAIT_READ_FILE;
++      break;
++    }
++
++    case WAIT_READ_FILE: {
++      if (isError(p_rwData->raw_frame.status)) break;
++      /*updating length field to discard status while processing read data
++      For RAW data, T4T module returns length including status length*/
++      if (p_rwData->raw_frame.p_data->len >= 0x02)
++        p_rwData->raw_frame.p_data->len -= 0x02;
++      nfa_t4tnfcee_store_rx_buf(p_rwData->raw_frame.p_data);
++      if (RW_T4tIsReadComplete()) {
++        nfa_t4tnfcee_cb.dataLen = nfa_t4tnfcee_cb.rd_offset;
++        nfa_t4tnfcee_cb.status = p_rwData->raw_frame.status;
++        nfa_t4tnfcee_notify_rx_evt();
++      } else {
++        RW_T4tNfceeReadPendingData();
++      }
++      break;
++    }
++
++    case WAIT_RESET_NLEN: {
++      if (isError(p_rwData->raw_frame.status)) break;
++      RW_T4tNfceeStartUpdateFile(nfa_t4tnfcee_cb.dataLen,
++                                 nfa_t4tnfcee_cb.p_dataBuf);
++      if (RW_T4tIsUpdateComplete())
++        nfa_t4tnfcee_cb.prop_rw_state = WAIT_WRITE_COMPLETE;
++      else
++        nfa_t4tnfcee_cb.prop_rw_state = WAIT_WRITE;
++      break;
++    }
++
++    case WAIT_WRITE: {
++      RW_T4tNfceeUpdateFile();
++      if (RW_T4tIsUpdateComplete())
++        nfa_t4tnfcee_cb.prop_rw_state = WAIT_WRITE_COMPLETE;
++      break;
++    }
++
++    case WAIT_WRITE_COMPLETE: {
++      if (isError(p_rwData->raw_frame.status)) break;
++      if (nfa_t4tnfcee_cb.cur_op == NFA_T4TNFCEE_OP_CLEAR) {
++        nfa_t4tnfcee_cb.status = p_rwData->raw_frame.status;
++        /*Length is already zero returning from here.*/
++        nfa_t4tnfcee_notify_rx_evt();
++      } else {
++        RW_T4tNfceeUpdateNlen(nfa_t4tnfcee_cb.dataLen);
++        nfa_t4tnfcee_cb.prop_rw_state = WAIT_UPDATE_NLEN;
++      }
++      break;
++    }
++
++    case WAIT_UPDATE_NLEN: {
++      if (isError(p_rwData->raw_frame.status)) break;
++      nfa_t4tnfcee_cb.status = p_rwData->raw_frame.status;
++      nfa_t4tnfcee_notify_rx_evt();
++      break;
++    }
++
++    default:
++      break;
++  }
++  GKI_freebuf(p_rwData->raw_frame.p_data);
++}
++/*******************************************************************************
++ **
++ ** Function         nfa_t4tnfcee_notify_rx_evt
++ **
++ ** Description      Notifies to upper layer with data
++ **
++ ** Returns          None
++ **
++ *******************************************************************************/
++void nfa_t4tnfcee_notify_rx_evt(void) {
++  tNFA_CONN_EVT_DATA conn_evt_data;
++  conn_evt_data.status = nfa_t4tnfcee_cb.status;
++  nfa_t4tnfcee_cb.prop_rw_state = OP_COMPLETE;
++  if (nfa_t4tnfcee_cb.cur_op == NFA_T4TNFCEE_OP_READ) {
++    if (conn_evt_data.status == NFA_STATUS_OK) {
++      conn_evt_data.data.p_data = nfa_t4tnfcee_cb.p_dataBuf;
++      conn_evt_data.data.len = nfa_t4tnfcee_cb.dataLen;
++    }
++    nfa_dm_act_conn_cback_notify(NFA_T4TNFCEE_READ_CPLT_EVT, &conn_evt_data);
++  } else if (nfa_t4tnfcee_cb.cur_op == NFA_T4TNFCEE_OP_WRITE) {
++    if (conn_evt_data.status == NFA_STATUS_OK) {
++      conn_evt_data.data.len = nfa_t4tnfcee_cb.dataLen;
++    }
++    nfa_dm_act_conn_cback_notify(NFA_T4TNFCEE_WRITE_CPLT_EVT, &conn_evt_data);
++  } else if (nfa_t4tnfcee_cb.cur_op == NFA_T4TNFCEE_OP_CLEAR) {
++    nfa_dm_act_conn_cback_notify(NFA_T4TNFCEE_CLEAR_CPLT_EVT, &conn_evt_data);
++  }
++  nfa_t4tnfcee_free_rx_buf();
++}
++
++/*******************************************************************************
++ **
++ ** Function         is_read_precondition_valid
++ **
++ ** Description      validates precondition for read
++ **
++ ** Returns          true/false
++ **
++ *******************************************************************************/
++bool is_read_precondition_valid(tNFA_T4TNFCEE_MSG* p_data) {
++  if ((p_data->op_req.p_fileId == nullptr) ||
++      (nfa_t4tnfcee_cb.t4tnfcee_state != NFA_T4TNFCEE_STATE_CONNECTED)) {
++    return false;
++  }
++  return true;
++}
++
++/*******************************************************************************
++ **
++ ** Function         is_write_precondition_valid
++ **
++ ** Description      validates precondition for write
++ **
++ ** Returns          true/false
++ **
++ *******************************************************************************/
++bool is_write_precondition_valid(tNFA_T4TNFCEE_MSG* p_data) {
++  if ((p_data->op_req.p_fileId == nullptr) ||
++      (nfa_t4tnfcee_cb.t4tnfcee_state != NFA_T4TNFCEE_STATE_CONNECTED) ||
++      (p_data->op_req.write.p_data == nullptr) ||
++      (p_data->op_req.write.len == 0)) {
++    return false;
++  }
++  return true;
++}
++
++/*******************************************************************************
++ **
++ ** Function         isReadPermitted
++ **
++ ** Description      Checks if read permitted for current file
++ **
++ ** Returns          true/false
++ **
++ *******************************************************************************/
++bool isReadPermitted(void) {
++  return (ccFileInfo.find(nfa_t4tnfcee_cb.cur_fileId)->second.read_access ==
++          T4T_NFCEE_READ_ALLOWED);
++}
++
++/*******************************************************************************
++ **
++ ** Function         isWritePermitted
++ **
++ ** Description      Checks if write permitted for current file
++ **
++ ** Returns          true/false
++ **
++ *******************************************************************************/
++bool isWritePermitted(void) {
++  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
++      "%s : 0x%2x", __func__,
++      ccFileInfo.find(nfa_t4tnfcee_cb.cur_fileId)->second.write_access);
++  return ((ccFileInfo.find(nfa_t4tnfcee_cb.cur_fileId)->second.write_access !=
++           T4T_NFCEE_WRITE_NOT_ALLOWED));
++}
++
++/*******************************************************************************
++ **
++ ** Function         isDataLenBelowMaxFileCapacity
++ **
++ ** Description      Checks if current data length is less not exceeding file
++ **                  capacity
++ **
++ ** Returns          true/false
++ **
++ *******************************************************************************/
++bool isDataLenBelowMaxFileCapacity(void) {
++  return (nfa_t4tnfcee_cb.dataLen <=
++          (ccFileInfo.find(nfa_t4tnfcee_cb.cur_fileId)->second.capacity -
++           T4TNFCEE_SIZEOF_LEN_BYTES));
++}
++
++/*******************************************************************************
++ **
++ ** Function         getWritePreconditionStatus
++ **
++ ** Description      Checks if write preconditions are satisfied
++ **
++ ** Returns          NFA_STATUS_OK if success else ERROR status
++ **
++ *******************************************************************************/
++tNFC_STATUS getWritePreconditionStatus() {
++  if (!isWritePermitted()) return NFA_STATUS_READ_ONLY;
++  if (!isDataLenBelowMaxFileCapacity()) {
++    DLOG_IF(ERROR, nfc_debug_enabled) << StringPrintf("Data Len exceeds max file size");
++    return NFA_STATUS_FAILED;
++  }
++  if (nfa_t4tnfcee_cb.cur_fileId == NDEF_FILE_ID) {
++    tNDEF_STATUS ndef_status;
++    if ((ndef_status = NDEF_MsgValidate(nfa_t4tnfcee_cb.p_dataBuf,
++                                        nfa_t4tnfcee_cb.dataLen, true)) !=
++        NDEF_OK) {
++      DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
++          "Invalid NDEF message. NDEF_MsgValidate returned %i", ndef_status);
++      return NFA_STATUS_REJECTED;
++    }
++    /*NDEF Msg validation SUCCESS*/
++    return NFA_STATUS_OK;
++  }
++  /*Proprietary file id*/
++  return NFA_STATUS_OK;
++}
++
++/*******************************************************************************
++ **
++ ** Function         nfa_t4tnfcee_get_len
++ **
++ ** Description      get the length of data available in current selected file
++ **
++ ** Returns          data len
++ **
++ *******************************************************************************/
++uint16_t nfa_t4tnfcee_get_len(tRW_DATA* p_rwData) {
++  uint8_t* p = nullptr;
++  uint16_t readLen = 0x00;
++  if (p_rwData->raw_frame.p_data->len > 0x00) {
++    p = (uint8_t*)(p_rwData->raw_frame.p_data + 1) +
++        p_rwData->raw_frame.p_data->offset;
++  }
++  if (p != nullptr) BE_STREAM_TO_UINT16(readLen, p);
++  if (readLen > 0x00) {
++    DLOG_IF(INFO, nfc_debug_enabled)
++        << StringPrintf("%s readLen  0x%x", __func__, readLen);
++  } else {
++    DLOG_IF(INFO, nfc_debug_enabled)
++        << StringPrintf("%s No Data to Read", __func__);
++  }
++  return readLen;
++}
++
++/*******************************************************************************
++ **
++ ** Function         isError
++ **
++ ** Description      Checks and notifies upper layer in case of error
++ **
++ ** Returns          true if error else false
++ **
++ *******************************************************************************/
++bool isError(tNFC_STATUS status) {
++  if (status != NFA_STATUS_OK) {
++    nfa_t4tnfcee_cb.status = NFC_STATUS_FAILED;
++    nfa_t4tnfcee_notify_rx_evt();
++    return true;
++  } else
++    return false;
++}
++#endif
+diff --git a/src/nfa/t4tnfcee/nfa_nfcee_api.cc b/src/nfa/t4tnfcee/nfa_nfcee_api.cc
+new file mode 100644
+index 000000000..132901cd2
+--- /dev/null
++++ b/src/nfa/t4tnfcee/nfa_nfcee_api.cc
+@@ -0,0 +1,177 @@
++/******************************************************************************
++ *
++ *  Copyright 2019 NXP
++ *
++ *  Licensed under the Apache License, Version 2.0 (the "License");
++ *  you may not use this file except in compliance with the License.
++ *  You may obtain a copy of the License at
++ *
++ *  http://www.apache.org/licenses/LICENSE-2.0
++ *
++ *  Unless required by applicable law or agreed to in writing, software
++ *  distributed under the License is distributed on an "AS IS" BASIS,
++ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ *  See the License for the specific language governing permissions and
++ *  limitations under the License.
++ *
++ ******************************************************************************/
++#include <android-base/stringprintf.h>
++#include <base/logging.h>
++#include <string.h>
++#include "nfa_nfcee_int.h"
++#if(NXP_EXTNS == TRUE)
++using android::base::StringPrintf;
++
++extern bool nfc_debug_enabled;
++/*******************************************************************************
++**
++** Function         NFA_T4tNfcEeOpenConnection
++**
++** Description      Creates logical connection with T4T Nfcee
++** Returns:
++**                  NFA_STATUS_OK if successfully initiated
++**                  NFA_STATUS_FAILED otherwise
++**
++*******************************************************************************/
++tNFA_STATUS NFA_T4tNfcEeOpenConnection() {
++  tNFA_T4TNFCEE_OPERATION* p_msg;
++
++  DLOG_IF(INFO, nfc_debug_enabled)
++      << StringPrintf("%s : Enter", __func__);
++
++  if ((p_msg = (tNFA_T4TNFCEE_OPERATION*)GKI_getbuf(
++           (uint16_t)(sizeof(tNFA_T4TNFCEE_OPERATION)))) != NULL) {
++    p_msg->hdr.event = NFA_T4TNFCEE_OP_REQUEST_EVT;
++    p_msg->op = NFA_T4TNFCEE_OP_OPEN_CONNECTION;
++    nfa_sys_sendmsg(p_msg);
++
++    return (NFA_STATUS_OK);
++  }
++
++  return (NFA_STATUS_FAILED);
++}
++/*******************************************************************************
++**
++** Function         NFA_T4tNfcEeClear
++**
++** Description      Clear Ndef data to T4T NFC EE.
++**                  For file ID NDEF, perform the NDEF detection procedure
++**                  and set the NDEF tag data to zero.
++** Returns:
++**                  NFA_STATUS_OK if successfully initiated
++**                  NFA_STATUS_FAILED otherwise
++**
++*******************************************************************************/
++tNFA_STATUS NFA_T4tNfcEeClear(uint8_t* p_fileId) {
++  tNFA_T4TNFCEE_OPERATION* p_msg;
++  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s : Enter ", __func__);
++
++  if ((p_msg = (tNFA_T4TNFCEE_OPERATION*)GKI_getbuf(
++           (uint16_t)(sizeof(tNFA_T4TNFCEE_OPERATION)))) != NULL) {
++    p_msg->hdr.event = NFA_T4TNFCEE_OP_REQUEST_EVT;
++    p_msg->op = NFA_T4TNFCEE_OP_CLEAR;
++    p_msg->p_fileId = p_fileId;
++    nfa_sys_sendmsg(p_msg);
++
++    return (NFA_STATUS_OK);
++  }
++  return (NFA_STATUS_FAILED);
++}
++/*******************************************************************************
++**
++** Function         NFA_T4tNfcEeWrite
++**
++** Description      Write data to the T4T NFC EE of given file id.
++**                  If file ID is of NDEF, perform the NDEF detection procedure
++**                  and write the NDEF tag data using the appropriate method for
++**                  NDEF EE.
++**                  If File ID is Not NDEF then reads proprietary way
++** Returns:
++**                  NFA_STATUS_OK if successfully initiated
++**                  NFA_STATUS_FAILED otherwise
++**
++*******************************************************************************/
++tNFA_STATUS NFA_T4tNfcEeWrite(uint8_t* p_fileId, uint8_t* p_data,
++                              uint32_t len) {
++  tNFA_T4TNFCEE_OPERATION* p_msg;
++
++  DLOG_IF(INFO, nfc_debug_enabled)
++      << StringPrintf("%s : Enter p_data=%s, len: %i", __func__, p_data, len);
++
++  if ((p_msg = (tNFA_T4TNFCEE_OPERATION*)GKI_getbuf(
++           (uint16_t)(sizeof(tNFA_T4TNFCEE_OPERATION)))) != NULL) {
++    p_msg->hdr.event = NFA_T4TNFCEE_OP_REQUEST_EVT;
++    p_msg->op = NFA_T4TNFCEE_OP_WRITE;
++    p_msg->p_fileId = p_fileId;
++    p_msg->write.len = len;
++    p_msg->write.p_data = p_data;
++    nfa_sys_sendmsg(p_msg);
++
++    return (NFA_STATUS_OK);
++  }
++
++  return (NFA_STATUS_FAILED);
++}
++
++/*******************************************************************************
++**
++** Function         NFA_T4tNfcEeRead
++**
++** Description      Read T4T message from NFCC area.of given file id
++**                  If file ID is of NDEF, perform the NDEF detection procedure
++**                  and read the NDEF tag data using the appropriate method for
++**                  NDEF EE.
++**                  If File ID is Not NDEF then reads proprietary way
++**
++** Returns:
++**                  NFA_STATUS_OK if successfully initiated
++**                  NFA_STATUS_FAILED otherwise
++**
++*******************************************************************************/
++tNFA_STATUS NFA_T4tNfcEeRead(uint8_t* p_fileId) {
++  tNFA_T4TNFCEE_OPERATION* p_msg;
++
++  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s : Enter ", __func__);
++
++  if ((p_msg = (tNFA_T4TNFCEE_OPERATION*)GKI_getbuf(
++           (uint16_t)(sizeof(tNFA_T4TNFCEE_OPERATION)))) != NULL) {
++    p_msg->hdr.event = NFA_T4TNFCEE_OP_REQUEST_EVT;
++    p_msg->op = NFA_T4TNFCEE_OP_READ;
++    p_msg->p_fileId = p_fileId;
++
++    nfa_sys_sendmsg(p_msg);
++
++    return (NFA_STATUS_OK);
++  }
++
++  return (NFA_STATUS_FAILED);
++}
++
++/*******************************************************************************
++**
++** Function         NFA_T4tNfcEeCloseConnection
++**
++** Description      Closes logical connection with T4T Nfcee
++** Returns:
++**                  NFA_STATUS_OK if successfully initiated
++**                  NFA_STATUS_FAILED otherwise
++**
++*******************************************************************************/
++tNFA_STATUS NFA_T4tNfcEeCloseConnection() {
++  tNFA_T4TNFCEE_OPERATION* p_msg;
++
++  DLOG_IF(INFO, nfc_debug_enabled)
++      << StringPrintf("%s : Enter", __func__);
++
++  if ((p_msg = (tNFA_T4TNFCEE_OPERATION*)GKI_getbuf(
++           (uint16_t)(sizeof(tNFA_T4TNFCEE_OPERATION)))) != NULL) {
++    p_msg->hdr.event = NFA_T4TNFCEE_OP_REQUEST_EVT;
++    p_msg->op = NFA_T4TNFCEE_OP_CLOSE_CONNECTION;
++    nfa_sys_sendmsg(p_msg);
++
++    return (NFA_STATUS_OK);
++  }
++
++  return (NFA_STATUS_FAILED);
++}
++#endif
+diff --git a/src/nfa/t4tnfcee/nfa_nfcee_main.cc b/src/nfa/t4tnfcee/nfa_nfcee_main.cc
+new file mode 100644
+index 000000000..55ff549cc
+--- /dev/null
++++ b/src/nfa/t4tnfcee/nfa_nfcee_main.cc
+@@ -0,0 +1,347 @@
++/******************************************************************************
++ *
++ *  Copyright 2019 NXP
++ *
++ *  Licensed under the Apache License, Version 2.0 (the "License");
++ *  you may not use this file except in compliance with the License.
++ *  You may obtain a copy of the License at
++ *
++ *  http://www.apache.org/licenses/LICENSE-2.0
++ *
++ *  Unless required by applicable law or agreed to in writing, software
++ *  distributed under the License is distributed on an "AS IS" BASIS,
++ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ *  See the License for the specific language governing permissions and
++ *  limitations under the License.
++ *
++ ******************************************************************************/
++#include <android-base/stringprintf.h>
++#include <base/logging.h>
++#include <string.h>
++#include "nfa_dm_int.h"
++#include "nfa_ee_int.h"
++#include "nfa_nfcee_int.h"
++#include "nfa_rw_int.h"
++#include "nfc_config.h"
++#if (NXP_EXTNS == TRUE)
++using android::base::StringPrintf;
++
++extern bool nfc_debug_enabled;
++
++tNFA_T4TNFCEE_CB nfa_t4tnfcee_cb;
++void nfa_t4tnfcee_info_cback(tNFA_EE_EVT event, tNFA_EE_CBACK_DATA* p_data);
++static void nfa_t4tnfcee_sys_enable(void);
++static void nfa_t4tnfcee_sys_disable(void);
++
++#define NFA_T4T_NFCEE_ENANLE_BIT_POS 0x01
++
++/*****************************************************************************
++** Constants and types
++*****************************************************************************/
++static const tNFA_SYS_REG nfa_t4tnfcee_sys_reg = {
++    nfa_t4tnfcee_sys_enable, nfa_t4tnfcee_handle_event,
++    nfa_t4tnfcee_sys_disable, NULL};
++/* NFA_T4TNFCEE actions */
++const tNFA_T4TNFCEE_ACTION nfa_t4tnfcee_action_tbl[] = {
++    nfa_t4tnfcee_handle_op_req, /* NFA_T4TNFCEE_OP_REQUEST_EVT            */
++};
++
++/*******************************************************************************
++**
++** Function         nfa_t4tnfcee_init
++**
++** Description      Initialize NFA T4TNFCEE
++**
++** Returns          None
++**
++*******************************************************************************/
++void nfa_t4tnfcee_init(void) {
++  if (NfcConfig::hasKey(NAME_NXP_T4T_NFCEE_ENABLE)) {
++    if (NFA_T4T_NFCEE_ENANLE_BIT_POS & NfcConfig::getUnsigned(NAME_NXP_T4T_NFCEE_ENABLE)) {
++      DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("nfa_t4tnfcee_init () updated ...");
++      /* initialize control block */
++      memset(&nfa_t4tnfcee_cb, 0, sizeof(tNFA_T4TNFCEE_CB));
++      nfa_t4tnfcee_cb.t4tnfcee_state = NFA_T4TNFCEE_STATE_DISABLED;
++      /* register message handler on NFA SYS */
++      nfa_sys_register(NFA_ID_T4TNFCEE, &nfa_t4tnfcee_sys_reg);
++   }
++ }
++}
++
++/*******************************************************************************
++**
++** Function         nfa_t4tnfcee_deinit
++**
++** Description      DeInitialize NFA T4TNFCEE
++**
++** Returns          None
++**
++*******************************************************************************/
++void nfa_t4tnfcee_deinit(void) {
++  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("nfa_t4tnfcee_deinit ()");
++
++  /* reset state */
++  nfa_t4tnfcee_cb.t4tnfcee_state = NFA_T4TNFCEE_STATE_DISABLED;
++
++}
++
++/*******************************************************************************
++**
++** Function         nfa_t4tnfcee_conn_cback
++**
++** Description      This function Process event from NCI
++**
++** Returns          None
++**
++*******************************************************************************/
++static void nfa_t4tnfcee_conn_cback(uint8_t conn_id, tNFC_CONN_EVT event,
++                                    tNFC_CONN* p_data) {
++  tNFA_CONN_EVT_DATA conn_evt_data;
++  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
++      "%s : Enter, conn_id = %d, event = 0x%x", __func__, conn_id, event);
++  switch (event) {
++    case NFC_CONN_CREATE_CEVT: {
++      if (conn_id == NCI_DEST_TYPE_T4T_NFCEE) {
++        if (p_data->status != NFA_STATUS_OK) {
++          NFC_ConnClose(NCI_DEST_TYPE_T4T_NFCEE);
++          nfa_t4tnfcee_cb.t4tnfcee_state = NFA_T4TNFCEE_STATE_OPEN_FAILED;
++        } else {
++          conn_evt_data.status = NFA_STATUS_OK;
++        }
++      }
++      break;
++    }
++    case NFC_CONN_CLOSE_CEVT: {
++      if (conn_id == NCI_DEST_TYPE_T4T_NFCEE) {
++        if (p_data->status != NFA_STATUS_OK) {
++          conn_evt_data.status = NFA_STATUS_FAILED;
++        } else {
++          nfa_t4tnfcee_cb.t4tnfcee_state = NFA_T4TNFCEE_STATE_DISCONNECTED;
++          conn_evt_data.status = p_data->status;
++        }
++        /*reset callbacks*/
++        RW_SetT4tNfceeInfo(NULL, 0);
++      }
++      break;
++    }
++    default:
++      conn_evt_data.status = NFA_STATUS_FAILED;
++      RW_SetT4tNfceeInfo(NULL, 0);
++      break;
++  }
++  nfa_dm_act_conn_cback_notify(NFA_T4TNFCEE_EVT, &conn_evt_data);
++}
++
++/*******************************************************************************
++ **
++ ** Function         nfa_t4tnfcee_info_cback
++ **
++ ** Description      Callback function to handle EE configuration events
++ **
++ ** Returns          None
++ **
++ *******************************************************************************/
++void nfa_t4tnfcee_info_cback(tNFA_EE_EVT event, tNFA_EE_CBACK_DATA* p_data) {
++  DLOG_IF(INFO, nfc_debug_enabled)
++      << StringPrintf("%s event: %x", __func__, event);
++  switch (event) {
++    case NFA_EE_DISCOVER_EVT:
++      if (nfa_t4tnfcee_cb.t4tnfcee_state == NFA_T4TNFCEE_STATE_DISABLED) {
++        nfa_t4tnfcee_cb.t4tnfcee_state = NFA_T4TNFCEE_STATE_TRY_ENABLE;
++        if ((p_data != nullptr) &&
++            (p_data->new_ee.ee_status != NFA_STATUS_OK)) {
++          NFC_NfceeModeSet(T4TNFCEE_TARGET_HANDLE, NFC_MODE_ACTIVATE);
++        }
++      }
++      break;
++    case NFA_EE_MODE_SET_EVT:
++      if ((p_data != nullptr) && (p_data->mode_set.status != NFA_STATUS_OK) &&
++          (nfa_t4tnfcee_cb.t4tnfcee_state >= NFA_T4TNFCEE_STATE_TRY_ENABLE)) {
++        nfa_t4tnfcee_cb.t4tnfcee_state = NFA_T4TNFCEE_STATE_DISABLED;
++        nfa_sys_cback_notify_enable_complete(NFA_ID_T4TNFCEE);
++        nfa_ee_report_disc_done(true);
++      } else {
++        nfa_ee_report_event(NULL,event,p_data);
++      }
++      break;
++    case NFA_EE_DISCOVER_REQ_EVT:
++      if (nfa_t4tnfcee_cb.t4tnfcee_state == NFA_T4TNFCEE_STATE_TRY_ENABLE) {
++        nfa_t4tnfcee_cb.t4tnfcee_state = NFA_T4TNFCEE_STATE_INITIALIZED;
++        nfa_sys_cback_notify_enable_complete(NFA_ID_T4TNFCEE);
++        nfa_ee_report_disc_done(true);
++      }
++      break;
++    case NFA_EE_CONNECT_EVT:
++      if ((nfa_t4tnfcee_cb.t4tnfcee_state == NFA_T4TNFCEE_STATE_INITIALIZED) ||
++          (nfa_t4tnfcee_cb.t4tnfcee_state == NFA_T4TNFCEE_STATE_DISCONNECTED)) {
++        if (NFC_STATUS_OK ==
++            NFC_ConnCreate(NCI_DEST_TYPE_NFCEE, T4TNFCEE_TARGET_HANDLE,
++                           NFC_NFCEE_INTERFACE_APDU, nfa_t4tnfcee_conn_cback))
++          nfa_t4tnfcee_cb.t4tnfcee_state = NFA_T4TNFCEE_STATE_CONNECTED;
++      } else {
++        tNFC_CONN p_data;
++        p_data.status = NFC_STATUS_FAILED;
++        nfa_t4tnfcee_conn_cback(NCI_DEST_TYPE_T4T_NFCEE, NFC_ERROR_CEVT,
++                                &p_data);
++      }
++      break;
++    default:
++      nfa_ee_report_event(NULL, event, p_data);
++      break;
++  }
++  return;
++}
++
++/*******************************************************************************
++**
++** Function         nfa_t4tnfcee_set_ee_cback
++**
++** Description      assign t4t callback to receive ee_events
++**
++** Returns          None
++**
++*******************************************************************************/
++void nfa_t4tnfcee_set_ee_cback(tNFA_EE_ECB* p_ecb) {
++  p_ecb->p_ee_cback = nfa_t4tnfcee_info_cback;
++  return;
++}
++
++/*******************************************************************************
++**
++** Function         nfa_rw_evt_2_str
++**
++** Description      convert nfa_rw evt to string
++**
++*******************************************************************************/
++static std::string nfa_t4tnfcee_evt_2_str(uint16_t event) {
++  switch (event) {
++    case NFA_RW_OP_REQUEST_EVT:
++      return "NFA_T4TNFCEE_OP_REQUEST_EVT";
++    default:
++      break;
++  }
++  return "Unknown";
++}
++
++/*******************************************************************************
++**
++** Function         nfa_t4tnfcee_sys_enable
++**
++** Description      Enable NFA HCI
++**
++** Returns          None
++**
++*******************************************************************************/
++void nfa_t4tnfcee_sys_enable(void) {
++  DLOG_IF(INFO, nfc_debug_enabled)
++      << StringPrintf("nfa_t4tnfcee_sys_enable ()");
++}
++
++/*******************************************************************************
++**
++** Function         nfa_t4tnfcee_sys_disable
++**
++** Description      Clean up t4tnfcee sub-system
++**
++**
++** Returns          void
++**
++*******************************************************************************/
++void nfa_t4tnfcee_sys_disable(void) {
++  /* Free scratch buffer if any */
++  nfa_t4tnfcee_free_rx_buf();
++
++  /* Free pending command if any */
++  if (nfa_t4tnfcee_cb.p_pending_msg) {
++    GKI_freebuf(nfa_t4tnfcee_cb.p_pending_msg);
++    nfa_t4tnfcee_cb.p_pending_msg = NULL;
++  }
++
++  nfa_sys_deregister(NFA_ID_T4TNFCEE);
++}
++
++/*******************************************************************************
++**
++** Function         nfa_t4tnfcee_proc_disc_evt
++**
++** Description      Called by nfa_dm to handle Ndef Nfcee Requests
++**
++** Returns          NFA_STATUS_OK if success else Failed status
++**
++*******************************************************************************/
++tNFC_STATUS nfa_t4tnfcee_proc_disc_evt(tNFA_T4TNFCEE_OP event) {
++  DLOG_IF(INFO, nfc_debug_enabled)
++      << StringPrintf("%s Enter. Event = %d ", __func__, (int)event);
++  tNFC_STATUS status = NFC_STATUS_FAILED;
++
++  switch (event) {
++    case NFA_T4TNFCEE_OP_OPEN_CONNECTION:
++      nfa_t4tnfcee_info_cback(NFA_EE_CONNECT_EVT, nullptr);
++      break;
++    case NFA_T4TNFCEE_OP_CLOSE_CONNECTION:
++      if (nfa_t4tnfcee_cb.t4tnfcee_state == NFA_T4TNFCEE_STATE_CONNECTED) {
++        NFC_SetStaticT4tNfceeCback(nfa_t4tnfcee_conn_cback);
++        if (NFC_STATUS_OK != NFC_ConnClose(NCI_DEST_TYPE_T4T_NFCEE)) {
++          tNFC_CONN p_data;
++          p_data.status = NFC_STATUS_FAILED;
++          nfa_t4tnfcee_conn_cback(NCI_DEST_TYPE_T4T_NFCEE, NFC_ERROR_CEVT,
++                                  &p_data);
++        }
++      }
++      break;
++  }
++  return status;
++}
++
++/*******************************************************************************
++**
++** Function         nfa_t4tnfcee_handle_event
++**
++** Description      nfa t4tnfcee main event handling function.
++**
++** Returns          true if caller should free p_msg buffer
++**
++*******************************************************************************/
++bool nfa_t4tnfcee_handle_event(NFC_HDR* p_msg) {
++  uint16_t act_idx;
++
++  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
++      "nfa_t4tnfcee_handle_event event: %s (0x%02x)",
++      nfa_t4tnfcee_evt_2_str(p_msg->event).c_str(), p_msg->event);
++
++  /* Get NFA_T4TNFCEE sub-event */
++  if ((act_idx = (p_msg->event & 0x00FF)) < (NFA_T4TNFCEE_MAX_EVT & 0xFF)) {
++    return (*nfa_t4tnfcee_action_tbl[act_idx])((tNFA_T4TNFCEE_MSG*)p_msg);
++  } else {
++    DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
++        "nfa_t4tnfcee_handle_event: unhandled event 0x%02X", p_msg->event);
++    return true;
++  }
++}
++
++/*******************************************************************************
++**
++** Function         nfa_t4tnfcee_is_enabled
++**
++** Description      T4T is enabled and initialized.
++**
++** Returns          true if T4T Nfcee is enabled initialization
++**
++*******************************************************************************/
++bool nfa_t4tnfcee_is_enabled(void) {
++  return (nfa_t4tnfcee_cb.t4tnfcee_state >= NFA_T4TNFCEE_STATE_INITIALIZED);
++}
++
++/*******************************************************************************
++**
++** Function         nfa_t4tnfcee_is_processing
++**
++** Description      Indicates if T4tNfcee Read or write under process
++**
++** Returns          true if under process else false
++**
++*******************************************************************************/
++bool nfa_t4tnfcee_is_processing(void) {
++ return (nfa_t4tnfcee_cb.t4tnfcee_state == NFA_T4TNFCEE_STATE_CONNECTED);
++}
++#endif
+diff --git a/src/nfc/include/nfc_api.h b/src/nfc/include/nfc_api.h
+index 84a1426d2..2b202d40b 100644
+--- a/src/nfc/include/nfc_api.h
++++ b/src/nfc/include/nfc_api.h
+@@ -801,6 +801,10 @@ typedef void(tNFC_CONN_CBACK)(uint8_t conn_id, tNFC_CONN_EVT event,
+ /* the static connection ID for HCI transport */
+ #define NFC_HCI_CONN_ID 1
+ 
++ #if (NXP_EXTNS == TRUE)
++ #define NFC_T4TNFCEE_CONN_ID 0x05
++ #endif
++
+ /*****************************************************************************
+ **  EXTERNAL FUNCTION DECLARATIONS
+ *****************************************************************************/
+@@ -1043,6 +1047,22 @@ extern tNFC_STATUS NFC_ConnClose(uint8_t conn_id);
+ *******************************************************************************/
+ extern void NFC_SetStaticRfCback(tNFC_CONN_CBACK* p_cback);
+ 
++#if (NXP_EXTNS == TRUE)
++/*******************************************************************************
++**
++** Function         NFC_SetStaticT4tNfceeCback
++**
++** Description      This function is called to update the data callback function
++**                  to receive the data for the given connection id.
++**
++** Parameters       p_cback - the connection callback function
++**
++** Returns          Nothing
++**
++*******************************************************************************/
++void NFC_SetStaticT4tNfceeCback(tNFC_CONN_CBACK* p_cback);
++#endif
++
+ /*******************************************************************************
+ **
+ ** Function         NFC_SetReassemblyFlag
+diff --git a/src/nfc/include/rw_api.h b/src/nfc/include/rw_api.h
+index ea9c1cf99..325d4d138 100644
+--- a/src/nfc/include/rw_api.h
++++ b/src/nfc/include/rw_api.h
+@@ -272,6 +272,10 @@ typedef union {
+ 
+ typedef void(tRW_CBACK)(tRW_EVENT event, tRW_DATA* p_data);
+ 
++#if (NXP_EXTNS == TRUE)
++typedef void(tNFA_T4TNFCEE_CC_INFO)(uint8_t* ccInfo, uint16_t ccLen);
++#endif
++
+ /*******************************************************************************
+ **
+ ** Function         RW_T1tRid
+@@ -1409,4 +1413,138 @@ extern tNFC_STATUS RW_MfcFormatNDef(void);
+ *******************************************************************************/
+ extern tNFC_STATUS RW_MfcWriteNDef(uint16_t buf_len, uint8_t* p_buffer);
+ 
++#if (NXP_EXTNS == TRUE)
++/*******************************************************************************
++**
++** Function         RW_T4tNfceeSelectApplication
++**
++** Description      Selects T4T application using T4T AID
++**
++** Returns          NFC_STATUS_OK if success else NFC_STATUS_FAILED
++**
++*******************************************************************************/
++extern tNFC_STATUS RW_T4tNfceeSelectApplication(void);
++
++/*******************************************************************************
++**
++** Function         RW_T4tNfceeUpdateCC
++**
++** Description      Updates the T4T data structures with CC info
++**
++** Returns          None
++**
++*******************************************************************************/
++void RW_T4tNfceeUpdateCC(uint8_t *ccInfo);
++
++/*******************************************************************************
++**
++** Function         RW_T4tNfceeSelectFile
++**
++** Description      Selects T4T Nfcee File
++**
++** Returns          NFC_STATUS_OK if success
++**
++*******************************************************************************/
++extern tNFC_STATUS RW_T4tNfceeSelectFile(uint16_t fileId);
++
++/*******************************************************************************
++**
++** Function         RW_T4tNfceeReadDataLen
++**
++** Description      Reads proprietary data Len
++**
++** Returns          NFC_STATUS_OK if success
++**
++*******************************************************************************/
++extern tNFC_STATUS RW_T4tNfceeReadDataLen();
++
++/*******************************************************************************
++**
++** Function         RW_T4tNfceeStartUpdateFile
++**
++** Description      starts writing data to the currently selected file
++**
++** Returns          NFC_STATUS_OK if success
++**
++*******************************************************************************/
++extern tNFC_STATUS RW_T4tNfceeStartUpdateFile(uint16_t length, uint8_t* p_data);
++
++/*******************************************************************************
++**
++** Function         RW_T4tNfceeUpdateFile
++**
++** Description      writes requested data to the currently selected file
++**
++** Returns          NFC_STATUS_OK if success else NFC_STATUS_FAILED
++**
++*******************************************************************************/
++extern tNFC_STATUS RW_T4tNfceeUpdateFile();
++
++/*******************************************************************************
++**
++** Function         RW_T4tIsUpdateComplete
++**
++** Description      Return true if no more data to write
++**
++** Returns          true/false
++**
++*******************************************************************************/
++extern bool RW_T4tIsUpdateComplete(void);
++
++/*******************************************************************************
++**
++** Function         RW_T4tIsReadComplete
++**
++** Description      Return true if no more data to be read
++**
++** Returns          true/false
++**
++*******************************************************************************/
++extern bool RW_T4tIsReadComplete(void);
++
++/*******************************************************************************
++**
++** Function         RW_T4tNfceeReadFile
++**
++** Description      Reads T4T Nfcee File
++**
++** Returns          NFC_STATUS_OK if success
++**
++*******************************************************************************/
++extern tNFC_STATUS RW_T4tNfceeReadFile(uint16_t offset,uint16_t Readlen);
++
++/*******************************************************************************
++**
++** Function         RW_T4tNfceeReadPendingData
++**
++** Description      Reads pending data from T4T Nfcee File
++**
++** Returns          NFC_STATUS_OK if success else NFC_STATUS_FAILED
++**
++*******************************************************************************/
++extern tNFC_STATUS RW_T4tNfceeReadPendingData();
++
++/*******************************************************************************
++**
++** Function         RW_T4tNfceeUpdateNlen
++**
++** Description      writes requested length to the file
++**
++** Returns          NFC_STATUS_OK if success
++**
++*******************************************************************************/
++extern tNFC_STATUS RW_T4tNfceeUpdateNlen(uint16_t len);
++
++/*******************************************************************************
++**
++** Function         RW_SetT4tNfceeInfo
++**
++** Description      This function sets callbacks for T4t operations.
++**
++** Returns          tNFC_STATUS
++**
++*******************************************************************************/
++extern tNFC_STATUS RW_SetT4tNfceeInfo(tRW_CBACK* p_cback, uint8_t conn_id);
++#endif
++
+ #endif /* RW_API_H */
+diff --git a/src/nfc/include/rw_int.h b/src/nfc/include/rw_int.h
+index f4027a592..b23eb786d 100644
+--- a/src/nfc/include/rw_int.h
++++ b/src/nfc/include/rw_int.h
+@@ -785,6 +785,9 @@ extern tNFC_STATUS rw_t1t_send_static_cmd(uint8_t opcode, uint8_t add,
+ extern void rw_t1t_process_timeout(TIMER_LIST_ENT* p_tle);
+ extern void rw_t1t_handle_op_complete(void);
+ 
++#if (NXP_EXTNS == TRUE)
++extern tNFC_STATUS RW_T4tNfceeInitCb(void);
++#endif
+ #if (RW_NDEF_INCLUDED == TRUE)
+ extern tRW_EVENT rw_t2t_info_to_event(const tT2T_CMD_RSP_INFO* p_info);
+ extern void rw_t2t_handle_rsp(uint8_t* p_data);
+diff --git a/src/nfc/include/tags_defs.h b/src/nfc/include/tags_defs.h
+index 0e73c3668..40999275a 100644
+--- a/src/nfc/include/tags_defs.h
++++ b/src/nfc/include/tags_defs.h
+@@ -401,6 +401,11 @@ typedef uint8_t tT3T_POLL_RC;
+ #define T4T_RSP_INSTR_NOT_SUPPORTED 0x6D00
+ #define T4T_RSP_CMD_NOT_ALLOWED 0x6986
+ 
++#if (NXP_EXTNS == TRUE)
++#define T4T_RSP_WARNING_PARAMS_CHECK(X) \
++  ((X == 0x63 || X == 0x62 || X == 0x61) ? true : false)
++#endif
++
+ /* V1.0 Type 4 Tag Applicaiton ID length */
+ #define T4T_V10_NDEF_TAG_AID_LEN 0x07
+ /* V2.0 Type 4 Tag Applicaiton ID length */
+@@ -680,4 +685,4 @@ typedef uint8_t tT3T_POLL_RC;
+ #define I93_ONS_BLOCKS_PER_SECTOR 32
+ #define I93_ONS_MAX_BLOCKS_PER_READ 32
+ 
+-#endif /* TAGS_DEFS_H */
+\ No newline at end of file
++#endif /* TAGS_DEFS_H */
+diff --git a/src/nfc/nfc/nfc_main.cc b/src/nfc/nfc/nfc_main.cc
+index 991d32082..779b29b43 100644
+--- a/src/nfc/nfc/nfc_main.cc
++++ b/src/nfc/nfc/nfc_main.cc
+@@ -44,9 +44,13 @@
+ 
+ /* NFC mandates support for at least one logical connection;
+  * Update max_conn to the NFCC capability on InitRsp */
++#if (NXP_EXTNS == TRUE)
++#define NFC_SET_MAX_CONN_DEFAULT() \
++  { nfc_cb.max_conn = 2; }
++#else
+ #define NFC_SET_MAX_CONN_DEFAULT() \
+   { nfc_cb.max_conn = 1; }
+-
++#endif
+ #else /* NFC_RW_ONLY */
+ #define ce_init()
+ #define llcp_init()
+@@ -1071,6 +1075,33 @@ void NFC_SetStaticRfCback(tNFC_CONN_CBACK* p_cback) {
+   nfc_data_event(p_cb);
+ }
+ 
++#if (NXP_EXTNS == TRUE)
++/*******************************************************************************
++**
++** Function         NFC_SetStaticT4tNfceeCback
++**
++** Description      This function is called to update the data callback function
++**                  to receive the data for the given connection id.
++**
++** Parameters       p_cback - the connection callback function
++**
++** Returns          Nothing
++**
++*******************************************************************************/
++void NFC_SetStaticT4tNfceeCback(tNFC_CONN_CBACK* p_cback) {
++  // tNFC_CONN_CB * p_cb = &nfc_cb.conn_cb[];
++  tNFC_CONN_CB* p_cb = nfc_find_conn_cb_by_conn_id(NFC_T4TNFCEE_CONN_ID);
++  if (p_cb != NULL) {
++    p_cb->p_cback = p_cback;
++    /* just in case DH has received NCI data before the data callback is set
++     * check if there's any data event to report on this connection id */
++    nfc_data_event(p_cb);
++  }
++  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
++      "%s = %p, p_cb->p_cback = %p", __func__, p_cb, p_cb->p_cback);
++}
++#endif
++
+ /*******************************************************************************
+ **
+ ** Function         NFC_SetReassemblyFlag
+diff --git a/src/nfc/nfc/nfc_utils.cc b/src/nfc/nfc/nfc_utils.cc
+index 855908b54..d8194a097 100644
+--- a/src/nfc/nfc/nfc_utils.cc
++++ b/src/nfc/nfc/nfc_utils.cc
+@@ -48,7 +48,14 @@ tNFC_CONN_CB* nfc_alloc_conn_cb(tNFC_CONN_CBACK* p_cback) {
+   int xx, max = NCI_MAX_CONN_CBS;
+   tNFC_CONN_CB* p_conn_cb = nullptr;
+ 
++#if (NXP_EXTNS == TRUE)
++/* Since T4T NFCEE connection will be active in parallel with HCI, it should
++be still NCI_MAX_CONN_CBS. additional check using NFC_CHECK_MAX_CONN will
++reduce the connection number. So it is commented*/
++// NFC_CHECK_MAX_CONN();
++#else
+   NFC_CHECK_MAX_CONN();
++#endif
+   for (xx = 0; xx < max; xx++) {
+     if (nfc_cb.conn_cb[xx].conn_id == NFC_ILLEGAL_CONN_ID) {
+       nfc_cb.conn_cb[xx].conn_id =
+diff --git a/src/nfc/tags/rw_main.cc b/src/nfc/tags/rw_main.cc
+index 24fe949a1..14b1c1767 100644
+--- a/src/nfc/tags/rw_main.cc
++++ b/src/nfc/tags/rw_main.cc
+@@ -273,3 +273,33 @@ tNFC_STATUS RW_SetActivatedTagType(tNFC_ACTIVATE_DEVT* p_activate_params,
+   if (status != NFC_STATUS_OK) rw_cb.p_cback = nullptr;
+   return status;
+ }
++
++#if (NXP_EXTNS == TRUE)
++/*******************************************************************************
++**
++** Function         RW_SetT4tNfceeInfo
++**
++** Description      This function selects the T4t Nfcee  for Reader/Writer mode.
++**
++** Returns          tNFC_STATUS
++**
++*******************************************************************************/
++tNFC_STATUS RW_SetT4tNfceeInfo(tRW_CBACK* p_cback, uint8_t conn_id) {
++  tNFC_STATUS status = NFC_STATUS_FAILED;
++  /* Reset tag-specific area of control block */
++      LOG(ERROR) << StringPrintf("RW_SetActivatedTagType %d ",conn_id);
++
++  memset(&rw_cb.tcb, 0, sizeof(tRW_TCB));
++
++  if (p_cback != NULL) {
++    rw_cb.p_cback = p_cback;
++    status = RW_T4tNfceeInitCb();
++    if (status != NFC_STATUS_OK) {
++      rw_cb.p_cback = NULL;
++    }
++  } else {
++    rw_cb.p_cback = NULL;
++  }
++  return status;
++}
++#endif
+diff --git a/src/nfc/tags/rw_t4t.cc b/src/nfc/tags/rw_t4t.cc
+index b7b6144cd..c59b747be 100644
+--- a/src/nfc/tags/rw_t4t.cc
++++ b/src/nfc/tags/rw_t4t.cc
+@@ -36,6 +36,11 @@
+ #include "rw_api.h"
+ #include "rw_int.h"
+ 
++#if (NXP_EXTNS == TRUE)
++#include "nfa_rw_int.h"
++#include "nfa_nfcee_int.h"
++#endif
++
+ using android::base::StringPrintf;
+ 
+ extern bool nfc_debug_enabled;
+@@ -128,7 +133,11 @@ static void rw_t4t_sm_ndef_format(NFC_HDR* p_r_apdu);
+ **
+ *******************************************************************************/
+ static bool rw_t4t_send_to_lower(NFC_HDR* p_c_apdu) {
+-  if (NFC_SendData(NFC_RF_CONN_ID, p_c_apdu) != NFC_STATUS_OK) {
++  uint8_t conn_id = NFC_RF_CONN_ID;
++#if (NXP_EXTNS == TRUE)
++  if (nfa_t4tnfcee_is_processing()) conn_id = NFC_T4TNFCEE_CONN_ID;
++#endif
++  if (NFC_SendData(conn_id, p_c_apdu) != NFC_STATUS_OK) {
+     LOG(ERROR) << StringPrintf("failed");
+     return false;
+   }
+@@ -1864,6 +1873,252 @@ static void rw_t4t_data_cback(__attribute__((unused)) uint8_t conn_id,
+   }
+ }
+ 
++#if(NXP_EXTNS == TRUE)
++/*******************************************************************************
++**
++** Function         rw_t4t_ndefee_select
++**
++** Description      Initialize T4T
++**
++** Returns          NFC_STATUS_OK if success
++**
++*******************************************************************************/
++tNFC_STATUS RW_T4tNfceeInitCb(void) {
++    DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s Enter ", __func__);
++  tRW_T4T_CB* p_t4t = &rw_cb.tcb.t4t;
++
++  DLOG_IF(INFO, nfc_debug_enabled)
++      << StringPrintf("rw_t4t_ndefee_select ()");
++
++  NFC_SetStaticT4tNfceeCback(rw_t4t_data_cback);
++
++  p_t4t->state = RW_T4T_STATE_IDLE;
++  p_t4t->version = T4T_MY_VERSION;
++  /* set it min of max R-APDU data size before reading CC file */
++  p_t4t->cc_file.max_le = T4T_MIN_MLE;
++
++  /* These will be udated during NDEF detection */
++  p_t4t->max_read_size = T4T_MAX_LENGTH_LE - T4T_FILE_LENGTH_SIZE;
++  p_t4t->max_update_size = RW_T4TNFCEE_DATA_PER_WRITE;
++
++  return NFC_STATUS_OK;
++}
++
++/*******************************************************************************
++**
++** Function         RW_T4tNfceeUpdateCC
++**
++** Description      Updates the T4T data structures with CC info
++**
++** Returns          None
++**
++*******************************************************************************/
++void RW_T4tNfceeUpdateCC(uint8_t *ccInfo) {
++  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s Enter", __func__);
++  tRW_T4T_CB* p_t4t = &rw_cb.tcb.t4t;
++  BE_STREAM_TO_UINT16(p_t4t->cc_file.max_le, ccInfo);
++  BE_STREAM_TO_UINT16(p_t4t->cc_file.max_lc, ccInfo);
++
++  /* Get max bytes to read per command */
++  if (p_t4t->cc_file.max_le >= RW_T4T_MAX_DATA_PER_READ) {
++      p_t4t->max_read_size = RW_T4T_MAX_DATA_PER_READ;
++  } else {
++    p_t4t->max_read_size = p_t4t->cc_file.max_le;
++  }
++
++  /* Le: valid range is 0x01 to 0xFF */
++  if (p_t4t->max_read_size >= T4T_MAX_LENGTH_LE) {
++      p_t4t->max_read_size = T4T_MAX_LENGTH_LE;
++  }
++
++  /* Get max bytes to update per command */
++  if (p_t4t->cc_file.max_lc >= RW_T4T_MAX_DATA_PER_WRITE) {
++    p_t4t->max_update_size = RW_T4T_MAX_DATA_PER_WRITE;
++  } else {
++    p_t4t->max_update_size = p_t4t->cc_file.max_lc;
++  }
++  /* Lc: valid range is 0x01 to 0xFF */
++  if (p_t4t->max_update_size >= T4T_MAX_LENGTH_LC) {
++    p_t4t->max_update_size = T4T_MAX_LENGTH_LC;
++  }
++
++
++  DLOG_IF(INFO, nfc_debug_enabled)
++      << StringPrintf("%s le %d  lc: %d  max_read_size: %d max_update_size: %d", __func__,
++         p_t4t->cc_file.max_le, p_t4t->cc_file.max_lc, p_t4t->max_read_size, p_t4t->max_update_size);
++
++}
++
++/*******************************************************************************
++**
++** Function         RW_T4tNfceeSelectApplication
++**
++** Description      Selects T4T application using T4T AID
++**
++** Returns          NFC_STATUS_OK if success else NFC_STATUS_FAILED
++**
++*******************************************************************************/
++tNFC_STATUS RW_T4tNfceeSelectApplication(void) {
++  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s Enter", __func__);
++  if (!rw_t4t_select_application(T4T_VERSION_2_0)) {
++    return NFC_STATUS_FAILED;
++  } else
++    return NFC_STATUS_OK;
++}
++
++/*******************************************************************************
++**
++** Function         RW_T4tNfceeSelectFile
++**
++** Description      Selects T4T Nfcee File
++**
++** Returns          NFC_STATUS_OK if success else NFC_STATUS_FAILED
++**
++*******************************************************************************/
++tNFC_STATUS RW_T4tNfceeSelectFile(uint16_t fileId) {
++  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s Enter", __func__);
++  if (!rw_t4t_select_file(fileId)) {
++    return NFC_STATUS_FAILED;
++  } else
++    return NFC_STATUS_OK;
++}
++
++/*******************************************************************************
++**
++** Function         RW_T4tNfceeReadDataLen
++**
++** Description      Reads proprietary data Len
++**
++** Returns          NFC_STATUS_OK if success else NFC_STATUS_FAILED
++**
++*******************************************************************************/
++tNFC_STATUS RW_T4tNfceeReadDataLen() {
++    DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s Enter ", __func__);
++  if (!rw_t4t_read_file(0x00, T4T_FILE_LENGTH_SIZE, false)) {
++    rw_t4t_handle_error(NFC_STATUS_FAILED, 0, 0);
++    return NFC_STATUS_FAILED;
++  }
++  return NFC_STATUS_OK;
++}
++
++/*******************************************************************************
++**
++** Function         RW_T4tNfceeReadFile
++**
++** Description      Reads T4T Nfcee File
++**
++** Returns          NFC_STATUS_OK if success else NFC_STATUS_FAILED
++**
++*******************************************************************************/
++tNFC_STATUS RW_T4tNfceeReadFile(uint16_t offset, uint16_t Readlen) {
++  // tNFC_STATUS status = NFC_STATUS_FAILED;
++  DLOG_IF(INFO, nfc_debug_enabled)
++      << StringPrintf("%s Enter : Readlen : 0x%x", __func__, Readlen);
++  if (!rw_t4t_read_file(offset, Readlen, false)) {
++    rw_t4t_handle_error(NFC_STATUS_FAILED, 0, 0);
++    return NFC_STATUS_FAILED;
++  }
++  return NFC_STATUS_OK;
++}
++
++/*******************************************************************************
++**
++** Function         RW_T4tNfceeReadPendingData
++**
++** Description      Reads pending data from T4T Nfcee File
++**
++** Returns          NFC_STATUS_OK if success else NFC_STATUS_FAILED
++**
++*******************************************************************************/
++tNFC_STATUS RW_T4tNfceeReadPendingData() {
++  tRW_T4T_CB* p_t4t = &rw_cb.tcb.t4t;
++  p_t4t->rw_length -= p_t4t->max_read_size;
++  p_t4t->rw_offset += p_t4t->max_read_size;
++  if (!rw_t4t_read_file(p_t4t->rw_offset, p_t4t->rw_length, true)) {
++    rw_t4t_handle_error(NFC_STATUS_FAILED, 0, 0);
++    return NFC_STATUS_FAILED;
++  }
++  return NFC_STATUS_OK;
++}
++
++/*******************************************************************************
++**
++** Function         RW_T4tNfceeUpdateNlen
++**
++** Description      writes requested length to the file
++**
++** Returns          NFC_STATUS_OK if success else NFC_STATUS_FAILED
++**
++*******************************************************************************/
++tNFC_STATUS RW_T4tNfceeUpdateNlen(uint16_t len) {
++  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s Enter ", __func__);
++  if (!rw_t4t_update_nlen(len)) {
++    return NFC_STATUS_FAILED;
++  }
++  return NFC_STATUS_OK;
++}
++
++/*******************************************************************************
++**
++** Function         RW_T4tNfceeStartUpdateFile
++**
++** Description      starts writing data to the currently selected file
++**
++** Returns          NFC_STATUS_OK if success else NFC_STATUS_FAILED
++**
++*******************************************************************************/
++tNFC_STATUS RW_T4tNfceeStartUpdateFile(uint16_t length, uint8_t* p_data) {
++  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s Enter ", __func__);
++  rw_cb.tcb.t4t.p_update_data = p_data;
++  rw_cb.tcb.t4t.rw_offset = T4T_FILE_LENGTH_SIZE;
++  rw_cb.tcb.t4t.rw_length = length;
++  return RW_T4tNfceeUpdateFile();
++}
++
++/*******************************************************************************
++**
++** Function         RW_T4tNfceeUpdateFile
++**
++** Description      writes requested data to the currently selected file
++**
++** Returns          NFC_STATUS_OK if success else NFC_STATUS_FAILED
++**
++*******************************************************************************/
++tNFC_STATUS RW_T4tNfceeUpdateFile() {
++    DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s Enter ", __func__);
++  if (!rw_t4t_update_file()) {
++    rw_t4t_handle_error(NFC_STATUS_FAILED, 0, 0);
++    rw_cb.tcb.t4t.p_update_data = nullptr;
++    return NFC_STATUS_FAILED;
++  }
++  return NFC_STATUS_OK;
++}
++
++/*******************************************************************************
++**
++** Function         RW_T4tIsUpdateComplete
++**
++** Description      Return true if no more data to write
++**
++** Returns          true/false
++**
++*******************************************************************************/
++bool RW_T4tIsUpdateComplete(void) { return (rw_cb.tcb.t4t.rw_length == 0); }
++
++/*******************************************************************************
++**
++** Function         RW_T4tIsReadComplete
++**
++** Description      Return true if no more data to be read
++**
++** Returns          true/false
++**
++*******************************************************************************/
++bool RW_T4tIsReadComplete(void) {
++  return (rw_cb.tcb.t4t.rw_length <= rw_cb.tcb.t4t.max_read_size);
++}
++#endif
++
+ /*******************************************************************************
+ **
+ ** Function         RW_T4tFormatNDef
+-- 
+2.32.0
+
+
+From a844fc8ff07dc8e3d62047f42148fc0495bdcf68 Mon Sep 17 00:00:00 2001
+From: nxf31698 <suryaprakash.konduru@nxp.com>
+Date: Fri, 11 Jun 2021 09:08:32 +0530
+Subject: [PATCH 6/9] [artf870316] NAME_NXP_T4T_NFCEE_ENABLE and
+ NAME_DEFAULT_T4TNFCEE_AID_POWER_STATE values updated from libnfc-nxp.conf
+ file
+
+---
+ src/adaptation/NfcAdaptation.cc |  4 ++++
+ src/include/hal_nxpnfc.h        |  4 +++-
+ src/include/nfc_config.h        |  1 +
+ src/nfc/include/nfc_api.h       | 10 +++++++++-
+ 4 files changed, 17 insertions(+), 2 deletions(-)
+
+diff --git a/src/adaptation/NfcAdaptation.cc b/src/adaptation/NfcAdaptation.cc
+index 32dbab87f..eb83373f6 100644
+--- a/src/adaptation/NfcAdaptation.cc
++++ b/src/adaptation/NfcAdaptation.cc
+@@ -311,6 +311,10 @@ void NfcAdaptation::GetNxpConfigs(
+       << StringPrintf("HAL_NFC_GET_NXP_CONFIG ioctl return value = %d", ret);
+   configMap.emplace(NAME_NXP_AGC_DEBUG_ENABLE,
+                   ConfigValue(inpOutData.out.data.nxpConfigs.wAgcDebugEnable));
++  configMap.emplace(NAME_NXP_T4T_NFCEE_ENABLE,
++                  ConfigValue(inpOutData.out.data.nxpConfigs.wT4TNdefEnable));
++  configMap.emplace(NAME_DEFAULT_T4TNFCEE_AID_POWER_STATE,
++                  ConfigValue(inpOutData.out.data.nxpConfigs.wT4TPowerState));
+ }
+ #endif
+ 
+diff --git a/src/include/hal_nxpnfc.h b/src/include/hal_nxpnfc.h
+index d7631e9e2..eb2ce3909 100755
+--- a/src/include/hal_nxpnfc.h
++++ b/src/include/hal_nxpnfc.h
+@@ -56,6 +56,8 @@ typedef struct {
+  */
+ typedef struct {
+   uint8_t wAgcDebugEnable;
++  uint8_t wT4TNdefEnable;
++  uint8_t wT4TPowerState;
+ } nxp_nfc_config_t;
+ /*
+  * nfc_nci_ExtnRsp_t shall contain response for command sent in transceive
+@@ -158,4 +160,4 @@ enum NxpNfcHalStatus {
+ };
+ 
+ #endif  // ANDROID_HARDWARE_HAL_NXPNFC_V1_0_H
+-#endif  // NXP_EXTNS
+\ No newline at end of file
++#endif  // NXP_EXTNS
+diff --git a/src/include/nfc_config.h b/src/include/nfc_config.h
+index 22dff9257..1169895a9 100644
+--- a/src/include/nfc_config.h
++++ b/src/include/nfc_config.h
+@@ -78,6 +78,7 @@
+ #if(NXP_EXTNS == TRUE)
+ #define NAME_NXP_AGC_DEBUG_ENABLE "NXP_AGC_DEBUG_ENABLE"
+ #define NAME_NXP_T4T_NFCEE_ENABLE "NXP_T4T_NFCEE_ENABLE"
++#define NAME_NXP_T4T_NDEF_NFCEE_AID "NXP_T4T_NDEF_NFCEE_AID"
+ #define NAME_DEFAULT_T4TNFCEE_AID_POWER_STATE "DEFAULT_T4TNFCEE_AID_POWER_STATE"
+ #endif
+ 
+diff --git a/src/nfc/include/nfc_api.h b/src/nfc/include/nfc_api.h
+index 2b202d40b..f21c989f9 100644
+--- a/src/nfc/include/nfc_api.h
++++ b/src/nfc/include/nfc_api.h
+@@ -78,7 +78,15 @@
+ #define NFC_STATUS_EE_PROTOCOL_ERR NCI_STATUS_EE_PROTOCOL_ERR
+ /* EE Timeout           */
+ #define NFC_STATUS_EE_TIMEOUT NCI_STATUS_EE_TIMEOUT
+-
++#if (NXP_EXTNS == TRUE)
++/**********************************************
++ * NFC Config Parameter IDs defined by NXP NFC
++ **********************************************/
++#define NXP_NFC_SET_CONFIG_PARAM_EXT \
++  ((unsigned char)0xA0) /* NXP NFC set config extension ID 0*/
++#define NXP_NFC_SET_CONFIG_PARAM_EXT_ID1 \
++  ((unsigned char)0xA1) /* NXP NFC set config extension ID 1*/
++#endif
+ /* 0xE0 ~0xFF are proprietary status codes */
+ /* Command started successfully                     */
+ #define NFC_STATUS_CMD_STARTED 0xE3
+-- 
+2.32.0
+
+
+From 818d73f55136cc647b59837b82f35ab723419c20 Mon Sep 17 00:00:00 2001
+From: nxf31698 <suryaprakash.konduru@nxp.com>
+Date: Wed, 23 Jun 2021 12:30:09 +0530
+Subject: [PATCH 7/9] [artf876754] Fix for Observed STATUS_SEMANTIC_ERROR for
+ RF_SET_LISTEN_MODE_ROUTING_CMD.
+
+Due to the time-out MW is sending Routing command. and it is failing
+because the RF DEACTIVATE to IDLE is not sent before.
+
+Aligned with "br_ar_12_comm_base_dev" branch.
+
+Start timer is not required as per the SNxxx common code base.
+---
+ src/nfa/ee/nfa_ee_act.cc | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/src/nfa/ee/nfa_ee_act.cc b/src/nfa/ee/nfa_ee_act.cc
+index 712ff979b..15a77081c 100644
+--- a/src/nfa/ee/nfa_ee_act.cc
++++ b/src/nfa/ee/nfa_ee_act.cc
+@@ -757,9 +757,11 @@ void nfa_ee_report_event(tNFA_EE_CBACK* p_cback, tNFA_EE_EVT event,
+ **
+ *******************************************************************************/
+ void nfa_ee_start_timer(void) {
++#if(NXP_EXTNS != TRUE)
+   if (nfa_dm_is_active())
+     nfa_sys_start_timer(&nfa_ee_cb.timer, NFA_EE_ROUT_TIMEOUT_EVT,
+                         NFA_EE_ROUT_TIMEOUT_VAL);
++#endif
+ }
+ 
+ /*******************************************************************************
+-- 
+2.32.0
+
+
+From 1bbac6ed3bc5f533a2fb42c3b8d1dc758b6ec2ff Mon Sep 17 00:00:00 2001
+From: nxf31698 <suryaprakash.konduru@nxp.com>
+Date: Wed, 23 Jun 2021 12:39:13 +0530
+Subject: [PATCH 8/9] [artf876766] Changed to core reset command with Keep
+ configuration during Nfc init.
+
+Aligned with PN8xT.
+---
+ src/include/nci_defs.h  | 4 ++++
+ src/nfc/nfc/nfc_task.cc | 6 +++++-
+ 2 files changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/src/include/nci_defs.h b/src/include/nci_defs.h
+index cd2c9d9a4..ccdd78e59 100644
+--- a/src/include/nci_defs.h
++++ b/src/include/nci_defs.h
+@@ -245,6 +245,10 @@
+ #define NCI_CON_CREATE_TAG_NFCEE_VAL 0x01
+ 
+ #define NCI_CORE_PARAM_SIZE_CON_CLOSE 0x01     /* Conn ID (1 octet) */
++#if (NXP_EXTNS == TRUE)
++/* Keep the NCI configuration (if possible) and perform NCI initialization. */
++#define NCI_RESET_TYPE_KEEP_CFG 0x00
++#endif
+ 
+ /* Reset the NCI configuration, and perform NCI initialization. */
+ #define NCI_RESET_TYPE_RESET_CFG 0x01
+diff --git a/src/nfc/nfc/nfc_task.cc b/src/nfc/nfc/nfc_task.cc
+index 19bbb8c60..c688bf519 100644
+--- a/src/nfc/nfc/nfc_task.cc
++++ b/src/nfc/nfc/nfc_task.cc
+@@ -364,7 +364,11 @@ uint32_t nfc_task(__attribute__((unused)) uint32_t arg) {
+ 
+       /* Reset the NFC controller. */
+       nfc_set_state(NFC_STATE_CORE_INIT);
+-      nci_snd_core_reset(NCI_RESET_TYPE_RESET_CFG);
++      #if (NXP_EXTNS == TRUE)
++            nci_snd_core_reset(NCI_RESET_TYPE_KEEP_CFG);
++      #else
++            nci_snd_core_reset(NCI_RESET_TYPE_RESET_CFG);
++      #endif
+     }
+ 
+     if (event & NFC_MBOX_EVT_MASK) {
+-- 
+2.32.0
+
+
+From 523568ee650a02d39544765b7705e94053ff25db Mon Sep 17 00:00:00 2001
+From: nxf31698 <suryaprakash.konduru@nxp.com>
+Date: Mon, 28 Jun 2021 10:11:53 +0530
+Subject: [PATCH 9/9] [artf878858] Fix for HCE-F Testcase when we switch from
+ HCE-AB testcases
+
+Patches taken from br_ar_12_comm_base_dev
+[artf672535] Fix for HCE-F configuration issue.
+
+    When IUT is configured for HCE-F test cases from NFC Forum DTA, the config
+    was not happening in all scenarios due to the condition comparision issue.
+    nfa_dm_cb.eDtaMode & NFA_DTA_HCEF_MODE is corrected.
+Commit ID: 24399d4fd6c56784a64e5620c9d1568cbc180132
+
+[artf865036][S-Beta1]:Restore eDtaMode after NCI SetConfig
+
+    Only reset NFA_DTA_HCEF_MODE flag if set to restore NFA_DTA_DEFAULT_MODE
+    flag in case NFA_CeRegisterFelicaSystemCodeOnDH is called before RF
+    discovery start. Otherwise callback notifications to DTA fail in P2P
+    raw mode.
+Branch:
+Commit ID: 430178468121140e5b8046340711a35098fed0fe
+
+
+[artf812618][CR12]: Fixed RF timeout and handling of protocol error
+
+ - Corrected sending wrong deactivate type which leading to RF timeout and abort()
+   while sending the DACTIVATED_EVT or DEACTIVATE_NTF in Listen mode to DTA
+
+ - On receiving protocol error notification, DTA expect stack to perform
+   deactivate process hence added sending of deactivate in case MW receives
+   NFC_ERROR_CEVT for NFA_SendRawFrame packet.
+
+Commit ID: c6f8d9d69507f5fd2a1b1e67fdf92b0ed76c1707
+
+[artf817003][CR12][Universal DTA]: Fix T4AT and T4BT protocol error test failures
+
+    - Modified to send T4T Interface Error to JNI layer only if DTA flag is not set.
+    - If DTA flag is set, like other tag handling, 'Deactivate to Discovery' will be triggered on occurence of this error.
+
+Commit ID: 3d695f4f34bcf024e349316eca0a1fba35cda2df
+---
+ src/nfa/ce/nfa_ce_act.cc  |  2 ++
+ src/nfa/ce/nfa_ce_api.cc  |  5 +++++
+ src/nfa/dm/nfa_dm_act.cc  | 11 +++++++++++
+ src/nfa/dm/nfa_dm_main.cc |  9 +++++++--
+ src/nfa/rw/nfa_rw_act.cc  |  8 +++++++-
+ 5 files changed, 32 insertions(+), 3 deletions(-)
+
+diff --git a/src/nfa/ce/nfa_ce_act.cc b/src/nfa/ce/nfa_ce_act.cc
+index cf47bb433..b1710e036 100644
+--- a/src/nfa/ce/nfa_ce_act.cc
++++ b/src/nfa/ce/nfa_ce_act.cc
+@@ -1053,7 +1053,9 @@ bool nfa_ce_deactivate_ntf(tNFA_CE_MSG* p_ce_msg) {
+ 
+     return true;
+   } else {
++#if (NXP_EXTNS != TRUE)
+     deact_type = NFC_DEACTIVATE_TYPE_IDLE;
++#endif
+   }
+ 
+   /* Tag is in idle state */
+diff --git a/src/nfa/ce/nfa_ce_api.cc b/src/nfa/ce/nfa_ce_api.cc
+index 55ad70be4..fe395e9a6 100644
+--- a/src/nfa/ce/nfa_ce_api.cc
++++ b/src/nfa/ce/nfa_ce_api.cc
+@@ -410,7 +410,12 @@ tNFA_STATUS NFA_CeSetIsoDepListenTech(tNFA_TECHNOLOGY_MASK tech_mask) {
+       (NFA_TECHNOLOGY_MASK_A | NFA_TECHNOLOGY_MASK_B);
+ 
+   DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("0x%x", tech_mask);
++
++#if (NXP_EXTNS == TRUE)
++  if (((tech_mask & ~use_mask) != 0)) {
++#else
+   if (((tech_mask & use_mask) == 0) || ((tech_mask & ~use_mask) != 0)) {
++#endif
+     LOG(ERROR) << StringPrintf(
+         "NFA_CeSetIsoDepListenTech: Invalid technology mask");
+     return (NFA_STATUS_INVALID_PARAM);
+diff --git a/src/nfa/dm/nfa_dm_act.cc b/src/nfa/dm/nfa_dm_act.cc
+index db6352211..99d66134f 100644
+--- a/src/nfa/dm/nfa_dm_act.cc
++++ b/src/nfa/dm/nfa_dm_act.cc
+@@ -1443,6 +1443,13 @@ static void nfa_dm_act_data_cback(__attribute__((unused)) uint8_t conn_id,
+   } else if (event == NFC_DEACTIVATE_CEVT) {
+     NFC_SetStaticRfCback(nullptr);
+   }
++#if (NXP_EXTNS == TRUE)
++  else if (event == NFC_ERROR_CEVT) {
++    LOG(ERROR) << StringPrintf(
++          "received NFC_ERROR_CEVT with status = 0x%X", p_data->status);
++      nfa_dm_rf_deactivate(NFA_DEACTIVATE_TYPE_DISCOVERY);
++  }
++#endif
+ }
+ 
+ /*******************************************************************************
+@@ -1660,7 +1667,11 @@ static void nfa_dm_poll_disc_cback(tNFA_DM_RF_DISC_EVT event,
+             (p_data->deactivate.type == NFC_DEACTIVATE_TYPE_SLEEP_AF)) {
+           evt_data.deactivated.type = NFA_DEACTIVATE_TYPE_SLEEP;
+         } else {
++#if (NXP_EXTNS == TRUE)
++          evt_data.deactivated.type = p_data->deactivate.type;
++#else
+           evt_data.deactivated.type = NFA_DEACTIVATE_TYPE_IDLE;
++#endif
+         }
+         /* notify deactivation to application */
+         nfa_dm_conn_cback_event_notify(NFA_DEACTIVATED_EVT, &evt_data);
+diff --git a/src/nfa/dm/nfa_dm_main.cc b/src/nfa/dm/nfa_dm_main.cc
+index fe03a5b1f..4f0b19406 100644
+--- a/src/nfa/dm/nfa_dm_main.cc
++++ b/src/nfa/dm/nfa_dm_main.cc
+@@ -409,12 +409,12 @@ tNFA_STATUS nfa_dm_check_set_config(uint8_t tlv_list_len, uint8_t* p_tlv_list,
+    * application, then send the SET_CONFIG command */
+   if (((updated_len || app_init) &&
+        (appl_dta_mode_flag == 0x00 ||
+-        (nfa_dm_cb.eDtaMode & 0x0F) == NFA_DTA_HCEF_MODE)) ||
++       (nfa_dm_cb.eDtaMode & NFA_DTA_HCEF_MODE))) ||
+       (appl_dta_mode_flag && app_init)) {
+     nfc_status = NFC_SetConfig(updated_len, p_tlv_list);
+ 
+     if (nfc_status == NFC_STATUS_OK) {
+-      if ((nfa_dm_cb.eDtaMode & 0x0F) == NFA_DTA_HCEF_MODE) {
++      if (nfa_dm_cb.eDtaMode & NFA_DTA_HCEF_MODE) {
+         nfa_dm_cb.eDtaMode &= ~NFA_DTA_HCEF_MODE;
+         nfa_dm_cb.eDtaMode |= NFA_DTA_DEFAULT_MODE;
+       }
+@@ -439,6 +439,11 @@ tNFA_STATUS nfa_dm_check_set_config(uint8_t tlv_list_len, uint8_t* p_tlv_list,
+       /* Increment setcfg_pending counter */
+       nfa_dm_cb.setcfg_pending_num++;
+     }
++
++    if ((nfa_dm_cb.eDtaMode & NFA_DTA_HCEF_MODE) == NFA_DTA_HCEF_MODE) {
++      nfa_dm_cb.eDtaMode &= ~NFA_DTA_HCEF_MODE;
++    }
++
+     return (nfc_status);
+ 
+   } else {
+diff --git a/src/nfa/rw/nfa_rw_act.cc b/src/nfa/rw/nfa_rw_act.cc
+index 0c0e60862..5f1dc67ff 100644
+--- a/src/nfa/rw/nfa_rw_act.cc
++++ b/src/nfa/rw/nfa_rw_act.cc
+@@ -1101,8 +1101,14 @@ static void nfa_rw_handle_t4t_evt(tRW_EVENT event, tRW_DATA* p_rw_data) {
+ 
+     case RW_T4T_INTF_ERROR_EVT: /* RF Interface error event         */
+       conn_evt_data.status = p_rw_data->status;
++#if (NXP_EXTNS == TRUE)
++     if((!appl_dta_mode_flag) && (conn_evt_data.status == NFC_STATUS_RF_PROTOCOL_ERR))
++       nfa_dm_act_conn_cback_notify(NFA_RW_INTF_ERROR_EVT, &conn_evt_data);
++     else
++       nfa_dm_rf_deactivate(NFA_DEACTIVATE_TYPE_DISCOVERY);
++#else
+       nfa_dm_act_conn_cback_notify(NFA_RW_INTF_ERROR_EVT, &conn_evt_data);
+-
++#endif
+       nfa_rw_command_complete();
+       nfa_rw_cb.cur_op = NFA_RW_OP_MAX;
+       break;
+-- 
+2.32.0
 
