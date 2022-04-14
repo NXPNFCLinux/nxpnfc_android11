@@ -109,7 +109,7 @@ static void RfOn (int handle)
 static void Prbs (int handle)
 {
     char NCIPrbsPN7120[] = {0x2F, 0x30, 0x04, 0x00, 0x00, 0x01, 0x01};
-    char NCIPrbsPN7150[] = {0x2F, 0x30, 0x06, 0x00, 0x00, 0x00, 0x00, 0x01, 0x01};
+    char NCIPrbsPN7160[] = {0x2F, 0x30, 0x06, 0x00, 0x00, 0x00, 0x00, 0x01, 0xFF};
     char Answer[256];
     int NbBytes = 0;
 	int tech, bitrate;
@@ -126,9 +126,9 @@ static void Prbs (int handle)
 		NbBytes = transceive(handle, NCIPrbsPN7120, sizeof(NCIPrbsPN7120), Answer, sizeof(Answer));
 	}
 	else {
-		NCIPrbsPN7150[5] = tech;
-		NCIPrbsPN7150[6] = bitrate;
-		NbBytes = transceive(handle, NCIPrbsPN7150, sizeof(NCIPrbsPN7150), Answer, sizeof(Answer));
+		NCIPrbsPN7160[5] = tech;
+		NCIPrbsPN7160[6] = bitrate;
+		NbBytes = transceive(handle, NCIPrbsPN7160, sizeof(NCIPrbsPN7160), Answer, sizeof(Answer));
 	}
 	printf("NFC Controller is now in PRBS mode - Press enter to stop\n");
 	fgets(Answer, sizeof(Answer), stdin);
